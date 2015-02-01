@@ -36,7 +36,7 @@
 				thisNodeList, thisNode;
 
 			for ( var i = 0; i < this.length; i++ ) {
-				thisNodeList = this[0].querySelectorAll(selector);
+				thisNodeList = this[i].querySelectorAll(selector);
 
 				for ( var j = 0; j < thisNodeList.length; j++ ) {
 					thisNode = thisNodeList[j];
