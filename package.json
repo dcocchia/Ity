@@ -1,0 +1,14 @@
+{
+  "name": "Ity",
+  "version": "0.0.1",
+  "description": "A miniscule, depedency free JavaScript MVC",
+  "main": "Ity.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+  	"mocha": "2.1.x"
+  },
+  "author": "Dominic Cocchiarella",
+  "license": "MIT"
+}
