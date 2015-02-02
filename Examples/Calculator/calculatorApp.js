@@ -27,9 +27,7 @@ var calcView = new Ity.View({
 	},
 
 	render: function() {
-		var elm = this.select(".output").first();
-
-		if (elm && elm.innerHTML) { elm.innerHTML = this.model.get("caluclatedOutPut"); }
+		this.select(".output").html(this.model.get("calculatedOutPut"));
 	},
 
 	onNumBtnClick: function(e) {
@@ -64,6 +62,7 @@ var calcView = new Ity.View({
 	},
 
 	calculate: function() {
+		//TODO: this example is pretty terrible right now.
 		var value = 0,
 			instruction,
 			lastInstruction;
@@ -87,7 +86,7 @@ var calcView = new Ity.View({
 
 		this.instructions = [];
 
-		this.model.set("caluclatedOutPut", value);
+		this.model.set("calculatedOutPut", value);
 	},
 
 	checkInstruction: function(instruction) {

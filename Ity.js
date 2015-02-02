@@ -3,7 +3,7 @@
 ;(function(window) {
 
 	var Ity = {
-		version: "0.0.1"
+		version: "0.1.0"
 	}
 
 	var SelectorObject = Ity.SelectorObject = function(nodeList) {
@@ -22,15 +22,16 @@
 			selectorObject[i] = nodeList[i];
 		}
 
+		//hack to get around instanceof checks only returning false
+		selectorObject.isSelectorObject = true;
+
 		//now we get an Array-like interface with custom prototype methods
 		return selectorObject;
 
 	}
 		
 	SelectorObject.prototype = {
-		//TODO: use find function in other selector functions to allow selectors to be passed into those functions
-		//ex myElm = view.select(".thing").first(".someOtherThing");
-		//Or should I create a filter function and use that?
+		constructor: SelectorObject,
 		find: function(selector) {
 			var nodeList = [],
 				thisNodeList, thisNode;
@@ -94,7 +95,7 @@
 			return new SelectorObject(nodeList);
 		},
 
-		children: function() {
+		children: function(selector) {
 			var nodeList = [],
 				thisNodeChildren,
 				thisNode;
@@ -105,7 +106,8 @@
 				for ( var j = 0; j < thisNodeChildren.length; j++ ) {
 					thisNode = thisNodeChildren[j];
 
-					if (thisNode && nodeList.indexOf(thisNode) < 0) {
+					if (thisNode && nodeList.indexOf(thisNode) < 0 
+						&& (!selector || thisNode.matches(selector)) ) {
 						nodeList.push(thisNode);
 					}
 				}
@@ -115,6 +117,53 @@
 			}
 
 			return new SelectorObject(nodeList);
+		},
+
+		before: function(content) {
+			this._html(content, 'beforebegin', content.isSelectorObject);
+		},
+
+		after: function(content) {
+			this._html(content, 'afterend', content.isSelectorObject);
+		},
+
+		append: function(content) {
+			this._html(content, 'beforeend', content.isSelectorObject);
+		},
+
+		prepend: function(content) {
+			this._html(content, 'afterbegin', content.isSelectorObject);
+		},
+
+		html: function(content) {
+			this._html(content, 'replace', content.isSelectorObject);
+		},
+
+		_html: function(content, position, isSelectorObject) {
+			var contentType = typeof(content),
+				thisNode, selectorNode;
+
+			for ( var i = 0; i < this.length; i++ ) {
+				thisNode = this[i];
+				if (!isSelectorObject) {
+					if (position !== "replace") {
+						thisNode.insertAdjacentHTML(position, ((content.outerHTML) ? content.outerHTML : content ));
+					} else {
+						thisNode.innerHTML = (content.outerHTML) ? content.outerHTML : content;
+					}
+				} else {
+					for ( var j = 0; j < content.length; j++ ) {
+						selectorNode = content[j];
+						if (position !== "replace") {
+							thisNode.insertAdjacentHTML(position, selectorNode.outerHTML);
+						} else {
+							thisNode.innerHTML = selectorNode.outerHTML;
+						}
+					}
+
+					j = 0;
+				}
+			}
 		}
 	}
 
@@ -224,7 +273,7 @@
 		initialize: function(options) {},
 
 		get: function(attr) {
-			if (this.data && this.data[attr]) { 
+			if (this.data) { 
 				return this.data[attr]; 
 			} else if (!attr) {
 				return this.data;
@@ -282,10 +331,16 @@
 	View.prototype = {
 
 		_setElement: function(elSelector) {
-			if (elSelector instanceof HTMLCollection) {
+			if (elSelector.isSelectorObject) {
 				this.el = elSelector;
+			} else if (elSelector instanceof NodeList) {
+				this.el = new SelectorObject(elSelector);
 			} else if (typeof(elSelector) === "string") {
-				this.el = window.document.querySelectorAll(elSelector);
+				this.el = new SelectorObject(window.document.querySelectorAll(elSelector) );
+			} else if (elSelector instanceof HTMLElement) {
+				this.el = new SelectorObject([HTMLElement]);
+			} else {
+				throw "el selector must be of type String, NodeList, HTMLElement or Ity.SelectorObject";
 			}
 		},
 
@@ -295,16 +350,12 @@
 			for (evtString in evtObj) {
 				if (this.el) {
 
-					if (this.el.length > 0 && this.el instanceof NodeList) {
+					if (this.el.length > 0 && this.el.isSelectorObject) {
 						for (var i = 0; i < this.el.length; i += 1) {
 							elmToBind = this.el[i].querySelectorAll(evtString);
 
 							this._bindNodeElmsEvents(elmToBind, evtObj, evtString);
 						}
-					} else if (this.el instanceof HTMLElement){
-						elmToBind = this.el.querySelectorAll(evtString);
-
-						this._bindNodeElmsEvents(elmToBind, evtObj, evtString);
 					}
 				}
 			}
@@ -362,11 +413,15 @@
 		},
 
 		select: function( selector, ctx ) {
-			//TODO: ctx as this.el[0] is too simplistic. What if multiple nodes? What if no nodes?
-			var ctx = ctx || this.el[0],
-				nodeList = ctx.querySelectorAll(selector);
+			var ctx = ctx || this.el;
 
-			return new SelectorObject(nodeList);
+			if (ctx instanceof HTMLElement || ctx instanceof HTMLDocument) {
+				return new SelectorObject(ctx.querySelectorAll(selector));
+			} else if (ctx.isSelectorObject){
+				return ctx.find(selector); //already a SelectorObject
+			} else {
+				throw "Context passed to .select() must be an HTMLElement or an Ity.SelectorObject";
+			}
 
 		}
 	}
