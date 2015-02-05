@@ -273,10 +273,10 @@
 		initialize: function(options) {},
 
 		get: function(attr) {
-			if (this.data) { 
-				return this.data[attr]; 
-			} else if (!attr) {
+			if (!attr) {
 				return this.data;
+			} else {
+				return (this.data) ? this.data[attr] : undefined;
 			}
 		},
 
