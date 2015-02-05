@@ -62,23 +62,35 @@ var calcView = new Ity.View({
 	},
 
 	calculate: function() {
-		//TODO: this example is pretty terrible right now.
-		var value = 0,
-			instruction,
-			lastInstruction;
+		var firstValue = 0,
+			secondValue = 0,
+			endValue = 0,
+			currentOperator, instruction, lastInstruction, nextInstruction;
 
 		for (var i = 0; i < this.instructions.length; i += 1) {
 			lastInstruction = (i > 0) ? this.instructions[i - 1] : undefined;
+			nextInstruction = (this.instructions[i + 1]) ? this.instructions[i + 1] : undefined;
 			instruction = this.instructions[i];
 
 			if (typeof(instruction) === "number") {
-				if (lastInstruction) {
-					value = this.executeOperator(lastInstruction, instruction, value); 
+				if (!currentOperator) {
+					firstValue = parseFloat(firstValue.toString() + instruction);
 				} else {
-					value = instruction;
+					secondValue = parseFloat(secondValue.toString() + instruction);
 				}
-			} else if (typeof(instruction) === "string" && this.checkInstruction(instruction)) {
 
+				if (currentOperator && (!nextInstruction || this.checkInstruction(nextInstruction)) ) {
+					endValue = this.executeOperator(currentOperator, firstValue, secondValue);
+					currentOperator = undefined;
+
+					if (nextInstruction) {
+						firstValue = endValue;
+						secondValue = 0;
+					}
+				}
+
+			} else if (this.checkInstruction(instruction)) {
+				currentOperator = instruction;
 			} else {
 				this.instructions.splice(i, 1);
 			}
@@ -86,7 +98,7 @@ var calcView = new Ity.View({
 
 		this.instructions = [];
 
-		this.model.set("calculatedOutPut", value);
+		this.model.set("calculatedOutPut", endValue);
 	},
 
 	checkInstruction: function(instruction) {
@@ -104,18 +116,18 @@ var calcView = new Ity.View({
 		}
 	},
 
-	executeOperator: function(opStr, num, value) {
+	executeOperator: function(opStr, firstValue, secondValue) {
 		switch(opStr) {
 			case "+":
-				return value += num;
+				return firstValue += secondValue;
 			case "-":
-				return value -= num;
+				return firstValue -= secondValue;
 			case "*":
-				return value * num;
+				return firstValue * secondValue;
 			case "/":
-				return value / num;
+				return firstValue / secondValue;
 			default:
-				return value;
+				return firstValue;
 		}
 	}
 });
