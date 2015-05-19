@@ -461,7 +461,7 @@
 			window.Ity = Ity;
 			return Ity;
 		});
-	 } else {
+	} else {
 		window.Ity = Ity;
 	}
 
