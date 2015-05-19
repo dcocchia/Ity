@@ -41,27 +41,26 @@ Based on jQuery's DOM querying
 
 ```js
 	Ity.select(<CSS Selector>).html(htmContent);
-
 ```
 
 ###Chaining
-'''js
+```js
 Ity.select(".myDiv").append('<p>Hi!</p>').parent().find('.myOtherDiv').remove();
-'''
+```
 
 ###Selections
-*find
-*filter
-*first
-*last
-*parent
-*children
-*remove
-*before
-*after
-*append
-*prepend
-*html
+* find
+* filter
+* first
+* last
+* parent
+* children
+* remove
+* before
+* after
+* append
+* prepend
+* html
 
 
 ## License
