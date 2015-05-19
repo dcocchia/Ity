@@ -1,9 +1,11 @@
-
+// Ity.js 0.1.2
+// (c) 2015 Dominic Cocchiarella
+// Ity may be freely distributed under the MIT license.
 
 ;(function(window) {
 
 	var Ity = {
-		version: "0.1.1"
+		version: "0.1.2"
 	}
 
 	var SelectorObject = Ity.SelectorObject = function(nodeList) {
@@ -454,5 +456,13 @@
 		}
 	}
 
-	window.Ity = Ity;
+	if (typeof define === 'function' && define.amd) {
+		define(function() {
+			window.Ity = Ity;
+			return Ity;
+		});
+	 } else {
+		window.Ity = Ity;
+	}
+
 })(window);
