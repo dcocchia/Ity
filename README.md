@@ -14,7 +14,7 @@ A miniscule, depedency free JavaScript MVC
 
 ## Installation
 ```
-npm install Ity
+npm install ity
 ```
 ## Basic Usage
 
