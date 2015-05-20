@@ -18,6 +18,7 @@
     "type": "git",
     "url": "https://github.com/dcocchia/Ity.git"
   },
+  "keywords": ["ity", "mvc", "model", "view", "spa"],
   "author": "Dominic Cocchiarella",
   "license": "MIT"
 }
