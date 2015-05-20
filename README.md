@@ -1,4 +1,4 @@
-# Ity
+# Ity [![npm version](https://badge.fury.io/js/ity.svg)](http://badge.fury.io/js/ity)
 A miniscule, depedency free JavaScript MVC
 
 ## Why?
