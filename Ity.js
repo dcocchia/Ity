@@ -135,14 +135,9 @@
 			return new SelectorObject([]);
 		},
 
-		addClass: function(value) {
-			var isString = (value && typeof value === "string");
-			var isNotSpace = regexps.nospaces.test(value);
-
-			if (isString && isNotSpace) {
-				for (var i = 0; i < this.length; i++) {
-					this[i].classList.add(value);
-				}
+		addClass: function() {
+			for (var i = 0; i < this.length; i++) {
+				this[i].classList.add.apply(this[i].classList, arguments);
 			}
 
 			return this;
@@ -159,6 +154,19 @@
 					if (this.Elm.classList.contains(value)) {
 						this[i].classList.remove(value);	
 					}
+				}
+			}
+
+			return this;
+		},
+
+		toggleClass: function(value) {
+			var isString = (value && typeof value === "string");
+			var isNotSpace = regexps.nospaces.test(value);
+
+			if (isString && isNotSpace) {
+				for (var i = 0; i < this.length; i++) {
+					this[i].classList.toggle(value);
 				}
 			}
 

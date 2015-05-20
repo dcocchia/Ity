@@ -100,6 +100,7 @@ Ity.select(".myDiv").append('<p>Hi!</p>').parent().find('.myOtherDiv').remove();
 * html
 * addClass
 * removeClass
+* toggleClass
 * hasClass
 
 ##Building locally
