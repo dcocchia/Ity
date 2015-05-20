@@ -8,6 +8,12 @@
 		version: "0.1.2"
 	}
 
+	var regexps = {
+		rclass: /[\t\r\n\f]/g,
+		rnotwhite: /\S/,
+		nospaces: /^\S*$/
+	}
+
 	var SelectorObject = Ity.SelectorObject = function(nodeList) {
 
 		var selectorObject = Object.create(Array.prototype);
@@ -127,6 +133,51 @@
 			}
 
 			return new SelectorObject([]);
+		},
+
+		addClass: function(value) {
+			var isString = (value && typeof value === "string");
+			var isNotSpace = regexps.nospaces.test(value);
+
+			if (isString && isNotSpace) {
+				for (var i = 0; i < this.length; i++) {
+					this[i].classList.add(value);
+				}
+			}
+
+			return this;
+		},
+
+		removeClass: function(value) {
+			var isString = (value && typeof value === "string");
+			var isNotSpace = regexps.nospaces.test(value);
+			var thisElm;
+
+			if (isString && isNotSpace) {
+				for (var i = 0; i < this.length; i++) {
+					thisElm = this[i];
+					if (this.Elm.classList.contains(value)) {
+						this[i].classList.remove(value);	
+					}
+				}
+			}
+
+			return this;
+		},
+
+		hasClass: function(value) {
+			var isString = (value && typeof value === "string");
+			var isNotSpace = regexps.nospaces.test(value);
+
+			if (!isString || !isNotSpace) { return false; }
+			
+			for (var i = 0; i < this.length; i++) {
+				if (this[i].classList.contains(value)) {
+					return true;	
+				}
+			}
+
+			return false;
 		},
 
 		before: function(content) {

@@ -98,6 +98,9 @@ Ity.select(".myDiv").append('<p>Hi!</p>').parent().find('.myOtherDiv').remove();
 * append
 * prepend
 * html
+* addClass
+* removeClass
+* hasClass
 
 
 ## License
