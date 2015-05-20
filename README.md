@@ -1,4 +1,4 @@
-# Ity
+# Ity [![npm version](https://badge.fury.io/js/ity.svg)](http://badge.fury.io/js/ity)
 A miniscule, depedency free JavaScript MVC
 
 ## Why?
@@ -14,7 +14,7 @@ A miniscule, depedency free JavaScript MVC
 
 ## Installation
 ```
-npm install Ity
+npm install ity
 ```
 ## Basic Usage
 
@@ -101,6 +101,16 @@ Ity.select(".myDiv").append('<p>Hi!</p>').parent().find('.myOtherDiv').remove();
 * addClass
 * removeClass
 * hasClass
+
+##Building locally
+Once you have the repository cloned:
+```js
+cd your/directory/Ity
+npm install
+gulp compress
+```
+
+For now this will just create ity.min.js and ity.min.js.map in the /dist directory.
 
 
 ## License
