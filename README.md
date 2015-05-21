@@ -1,5 +1,5 @@
 # Ity [![npm version](https://badge.fury.io/js/ity.svg)](http://badge.fury.io/js/ity)
-A miniscule, depedency free JavaScript MVC
+A miniscule, dependency free JavaScript MVC
 
 ## Why?
 * Tiny footprint for mobile networks (~5kb minified)
