@@ -42,7 +42,15 @@ var myView = new Ity.View({
 
 	render: function() {
 		this.select(".myContainer").html(this.model.get("someData"));
+	},
+
+	onBtnClick: function(evt) {
+		var output = this.select("#difWithId").find(".output");
+
+		output.html("<div><p>Click!</p></div>")
 	}
+
+	//... more click, hover, focus events from events hash 
 });	
 
 ```
@@ -74,15 +82,24 @@ var myView = new Ity.View({
 * View.select(<DOMquery>) - select DOM elements within set el object. 
 
 ##The Selection Engine and Selector object
-Based on jQuery's DOM querying
+Based on jQuery's DOM querying. Selection is done from within a View instance. 
 
 ```js
-Ity.select(<CSS Selector>).html(htmContent);
+var myView new Ity.View({
+	el: '.someDiv',
+	render: function() {
+		// view.select will default to interacting with only the el and it's children
+		this.select('.someChildofSomeDiv').html('<p>Hello, View!</p>'')
+	}
+});
+
+view.select(<CSS Selector>).html(htmContent);
 ```
 
 ###Chaining
 ```js
-Ity.select(".myDiv").append('<p>Hi!</p>').parent().find('.myOtherDiv').remove();
+myView = new Ity.view({ el: '.parentDiv'} );
+myView.select('.myDiv').append('<p>Hi!</p>').parent().find('.myOtherDiv').remove();
 ```
 
 ###Selections
