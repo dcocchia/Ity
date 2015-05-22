@@ -1,11 +1,11 @@
-// Ity.js 0.1.2
+// Ity.js 0.2.0
 // (c) 2015 Dominic Cocchiarella
 // Ity may be freely distributed under the MIT license.
 
 ;(function(window) {
 
 	var Ity = {
-		version: "0.1.2"
+		version: "0.2.0"
 	}
 
 	var regexps = {
