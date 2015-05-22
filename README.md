@@ -7,7 +7,7 @@ A miniscule, dependency free JavaScript MVC
 * Mobile first - no legacy hackery for ie < 10.
 * Great for spinning up small, mobile-specific apps
 
-##To Do
+## To Do
 * More useful event delegation. Currently, views must call _setElement() every time they render new DOM elements
 * Currently no router for fancy SPA style urls
 
@@ -54,34 +54,34 @@ var myView = new Ity.View({
 });	
 
 ```
-##App
+## App
 
 * App.getView(id) - returns Ity.View instance by id
 * App.addView(view) - add Ity.View instance to internal views array
 * App.removeView(id) - remove Ity.View instance from internal views array by id
 * App.trigger(evtName, data) -- trigger event by name on Application level. Optionally pass data
 
-##Model
+## Model
 * Model.initialize(options) - called on instatiation of Model instances, optional options hash can be passed
-* Model.get("someDataPoint") - get value from internal data object hash by key
-* Model.set("someDataPoint", <data>) - set value of internal data object by key
-* Model.unSet("someDataPoint") - clear out valye of interanl data objecy by key
+* Model.get(someDataPoint) - get value from internal data object hash by key
+* Model.set(someDataPoint, data) - set value of internal data object by key
+* Model.unSet(someDataPoint) - clear out valye of interanl data objecy by key
 * Model.clear() - clear entire internal data objecy
-* Model.on("eventName", <callback>) - listen to Model instance events and call callback function
+* Model.on(eventName, callback) - listen to Model instance events and call callback function
 * Model.sync(options) - sync data in internal data object. Optionally pass options hash for url, type, success, error
-* Model.trigger("eventName", <data>) - trigger event by name on Model instance and optionally pass data
+* Model.trigger(eventName, data) - trigger event by name on Model instance and optionally pass data
 
-##View
+## View
 * View.initialize(options) - called on instatiation of View instances, optional options hash can be passed
-* View.getName() - return name attribute of view.
-* View.get(<key>) - return attribute of view by key String
-* View.set(<key>, <value>) - set attribute of view to passed value
-* View.on("eventName", <callback>) - listen to View instance events and call callback function
+* View.getName() - return name attribute of view
+* View.get(key) - return attribute of view by key String
+* View.set(key, value) - set attribute of view to passed value
+* View.on(eventName, callback) - listen to View instance events and call callback function
 * View.remove() - Remove internal el element and remove view from app
-* View.trigger("eventName", <data>) - trigger event by name on View instance and optionally pass data
-* View.select(<DOMquery>) - select DOM elements within set el object. 
+* View.trigger(eventName, data) - trigger event by name on View instance and optionally pass data
+* View.select(DOMquery) - select DOM elements within set el object. 
 
-##The Selection Engine and Selector object
+## The Selection Engine and Selector object
 Based on jQuery's DOM querying. Selection is done from within a View instance. 
 
 ```js
@@ -96,13 +96,13 @@ var myView new Ity.View({
 view.select(<CSS Selector>).html(htmContent);
 ```
 
-###Chaining
+### Chaining
 ```js
 myView = new Ity.view({ el: '.parentDiv'} );
 myView.select('.myDiv').append('<p>Hi!</p>').parent().find('.myOtherDiv').remove();
 ```
 
-###Selections
+### Selections
 * find
 * filter
 * first
@@ -120,7 +120,7 @@ myView.select('.myDiv').append('<p>Hi!</p>').parent().find('.myOtherDiv').remove
 * toggleClass
 * hasClass
 
-##Building locally
+## Building locally
 Once you have the repository cloned:
 ```js
 cd your/directory/Ity
