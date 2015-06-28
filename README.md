@@ -89,7 +89,7 @@ var myView new Ity.View({
 	el: '.someDiv',
 	render: function() {
 		// view.select will default to interacting with only the el and it's children
-		this.select('.someChildofSomeDiv').html('<p>Hello, View!</p>'')
+		this.select('.someChildofSomeDiv').html('<p>Hello, View!</p>')
 	}
 });
 
