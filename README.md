@@ -98,7 +98,7 @@ view.select(<CSS Selector>).html(htmContent);
 
 ### Chaining
 ```js
-myView = new Ity.view({ el: '.parentDiv'} );
+myView = new Ity.View({ el: '.parentDiv'} );
 myView.select('.myDiv').append('<p>Hi!</p>').parent().find('.myOtherDiv').remove();
 ```
 
