@@ -149,12 +149,12 @@
 			var thisElm;
 
 			if (isString && isNotSpace) {
-				for (var i = 0; i < this.length; i++) {
-					thisElm = this[i];
-					if (this.Elm.classList.contains(value)) {
-						this[i].classList.remove(value);	
-					}
-				}
+                                for (var i = 0; i < this.length; i++) {
+                                        thisElm = this[i];
+                                        if (thisElm.classList.contains(value)) {
+                                                thisElm.classList.remove(value);
+                                        }
+                                }
 			}
 
 			return this;
@@ -242,9 +242,9 @@
 		args || (args = []);
 		context || (context = this);
 
-		func = function() {
-			fn.apply(context, args);
-		}
+                var func = function() {
+                        fn.apply(context, args);
+                }
 
 		if (document.readyState != 'loading'){
 			func();
@@ -270,16 +270,16 @@
 			if (view instanceof View) { this.views.push(view); }
 		},
 
-		removeView: function(id) {
-			var thisView;
+                removeView: function(id) {
+                        var thisView;
 
-			for (var i = 0; i < this.views.length; i += 0) {
-				thisView = this.views[i];
-				if (thisView.id === id) {
-					 this.views.splice(i, 1);
-				}
-			}
-		},
+                        for (var i = 0; i < this.views.length; i += 1) {
+                                thisView = this.views[i];
+                                if (thisView.id === id) {
+                                         this.views.splice(i, 1);
+                                }
+                        }
+                },
 
 		trigger: function(evtName, data) {
 			var thisView;
@@ -421,8 +421,8 @@
 				this.el = new SelectorObject(elSelector);
 			} else if (typeof(elSelector) === "string") {
 				this.el = new SelectorObject(window.document.querySelectorAll(elSelector) );
-			} else if (elSelector instanceof HTMLElement) {
-				this.el = new SelectorObject([HTMLElement]);
+                        } else if (elSelector instanceof HTMLElement) {
+                                this.el = new SelectorObject([elSelector]);
 			} else {
 				throw "el selector must be of type String, NodeList, HTMLElement or Ity.SelectorObject";
 			}
