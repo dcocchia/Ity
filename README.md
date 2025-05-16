@@ -62,7 +62,7 @@ var myView = new Ity.View({
 * App.trigger(evtName, data) -- trigger event by name on Application level. Optionally pass data
 
 ## Model
-* Model.initialize(options) - called on instatiation of Model instances, optional options hash can be passed
+* Model.initialize(options) - called on instantiation of Model instances, optional options hash can be passed
 * Model.get(someDataPoint) - get value from internal data object hash by key
 * Model.set(someDataPoint, data) - set value of internal data object by key
 * Model.unSet(someDataPoint) - clear out valye of interanl data objecy by key
@@ -72,7 +72,7 @@ var myView = new Ity.View({
 * Model.trigger(eventName, data) - trigger event by name on Model instance and optionally pass data
 
 ## View
-* View.initialize(options) - called on instatiation of View instances, optional options hash can be passed
+* View.initialize(options) - called on instantiation of View instances, optional options hash can be passed
 * View.getName() - return name attribute of view
 * View.get(key) - return attribute of view by key String
 * View.set(key, value) - set attribute of view to passed value
