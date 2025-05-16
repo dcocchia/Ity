@@ -4,7 +4,7 @@
   "description": "A miniscule, depedency free JavaScript MVC",
   "main": "Ity.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "mocha test"
   },
   "devDependencies": {
     "mocha": "2.1.x",
