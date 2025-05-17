@@ -1,5 +1,5 @@
 // Ity.js 0.2.0
-// (c) 2015 Dominic Cocchiarella
+// (c) 2025 Dominic Cocchiarella
 // Ity may be freely distributed under the MIT license.
 
 ;(function(window) {

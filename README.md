@@ -136,7 +136,7 @@ For now this will just create ity.min.js and ity.min.js.map in the /dist directo
 ## License
 The MIT License (MIT)
 
-Copyright (c) 2015 Dominic Cocchiarella
+Copyright (c) 2025 Dominic Cocchiarella
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
