@@ -22,8 +22,37 @@ export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') 
   global.NodeList = dom.window.NodeList;
   global.HTMLElement = dom.window.HTMLElement;
   global.HTMLDocument = dom.window.HTMLDocument;
+
+  if (!global.window.addEventListener) {
+    const listeners: Record<string, Function[]> = {};
+    global.window.addEventListener = function (type: string, handler: Function) {
+      (listeners[type] ||= []).push(handler);
+    };
+    global.window.removeEventListener = function (type: string, handler: Function) {
+      const arr = listeners[type];
+      if (!arr) return;
+      const idx = arr.indexOf(handler);
+      if (idx >= 0) arr.splice(idx, 1);
+    };
+    global.window.dispatchEvent = function (evt: { type: string }) {
+      const arr = listeners[evt.type] || [];
+      arr.slice().forEach((fn) => fn.call(global.window, evt));
+    };
+  }
+  if (!global.window.history) {
+    global.window.history = {
+      stack: ["/"],
+      pushState: function (_s: any, _t: any, path: string) {
+        this.stack.push(path);
+        global.window.location.pathname = path;
+      },
+    } as any;
+  }
+  if (!global.window.location) {
+    global.window.location = { pathname: "/" } as any;
+  }
   if (!global.window.HTMLElement.prototype.getAttribute) {
-    global.window.HTMLElement.prototype.getAttribute = function(name: string): any {
+    global.window.HTMLElement.prototype.getAttribute = function (name: string): any {
       const attrs: any = (this as any).attributes || {};
       if (name in attrs) return attrs[name];
       if (name.startsWith('data-calc-')) {
@@ -35,7 +64,8 @@ export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') 
   }
   if (!global.window.HTMLElement.prototype._dispatchPatched) {
     const origDispatch = global.window.HTMLElement.prototype.dispatchEvent;
-    global.window.HTMLElement.prototype.dispatchEvent = function(event: any): void {
+    
+    global.window.HTMLElement.prototype.dispatchEvent = function (event: any): void {
       event.target || (event.target = this);
       if ((this as any)._listeners && (this as any)._listeners[event.type]) {
         for (const handler of (this as any)._listeners[event.type].slice()) {
