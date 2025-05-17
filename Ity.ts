@@ -1,10 +1,10 @@
-// Ity.ts 0.2.0
+// Ity.ts 1.0.0
 // (c) 2025 Dominic Cocchiarella
 // Converted to TypeScript
 declare var define: any;
 
 (function (window: any) {
-  const Ity: any = { version: "0.2.0" };
+  const Ity: any = { version: "1.0.0" };
 
   const regexps = {
     rclass: /[\t\r\n\f]/g,
