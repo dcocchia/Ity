@@ -17,41 +17,40 @@ npm install ity
 ```
 ## Basic Usage
 
-```js
-var myApp = new Ity.Application();
-var myModel = new Ity.Model();
-var myView = new Ity.View({
-	el: '.someElement',
-	app: myApp,
-	model: myModel,
-	events: {
-		".btn" : {
-			"click": "onBtnClick",
-			"hover": "onBtnHover"
-		},
-		".fancyBtn" : {
-			"click": "onFancyBtnClick",
-			"focus": "onFancyBtnFocus"
-		}
-	},
+```ts
+const myApp = new Ity.Application();
+const myModel = new Ity.Model();
+const myView = new Ity.View({
+  el: '.someElement',
+  app: myApp,
+  model: myModel,
+  events: {
+    '.btn': {
+      click: 'onBtnClick',
+      hover: 'onBtnHover',
+    },
+    '.fancyBtn': {
+      click: 'onFancyBtnClick',
+      focus: 'onFancyBtnFocus',
+    },
+  },
 
-	initialize: function(options) {
-		this.model.on("change", this.render, this);
-	},
+  initialize(options?: unknown) {
+    this.model.on('change', this.render, this);
+  },
 
-	render: function() {
-		this.select(".myContainer").html(this.model.get("someData"));
-	},
+  render() {
+    this.select('.myContainer').html(this.model.get('someData'));
+  },
 
-	onBtnClick: function(evt) {
-		var output = this.select("#difWithId").find(".output");
+  onBtnClick(evt: Event) {
+    const output = this.select('#difWithId').find('.output');
 
-		output.html("<div><p>Click!</p></div>")
-	}
+    output.html('<div><p>Click!</p></div>');
+  },
 
-	//... more click, hover, focus events from events hash 
-});	
-
+  // ... more click, hover, focus events from events hash
+});
 ```
 ## App
 
@@ -83,24 +82,28 @@ var myView = new Ity.View({
 ## The Selection Engine and Selector object
 Based on jQuery's DOM querying. Selection is done from within a View instance. 
 
-```js
-var myView new Ity.View({
-	el: '.someDiv',
-	render: function() {
-		// view.select will default to interacting with only the el and it's children
-		this.select('.someChildofSomeDiv').html('<p>Hello, View!</p>')
-	}
+
+```ts
+const myView = new Ity.View({
+  el: '.someDiv',
+  render() {
+    // view.select will default to interacting with only the el and its children
+    this.select('.someChildofSomeDiv').html('<p>Hello, View!</p>');
+  },
 });
 
-view.select(<CSS Selector>).html(htmContent);
+myView.select('<CSS Selector>').html(htmlContent);
 ```
-
 ### Chaining
-```js
-myView = new Ity.View({ el: '.parentDiv'} );
-myView.select('.myDiv').append('<p>Hi!</p>').parent().find('.myOtherDiv').remove();
+```ts
+const myView = new Ity.View({ el: '.parentDiv' });
+myView
+  .select('.myDiv')
+  .append('<p>Hi!</p>')
+  .parent()
+  .find('.myOtherDiv')
+  .remove();
 ```
-
 ### Selections
 * find
 * filter
@@ -121,7 +124,7 @@ myView.select('.myDiv').append('<p>Hi!</p>').parent().find('.myOtherDiv').remove
 
 ## Building locally
 Once you have the repository cloned:
-```js
+```bash
 cd your/directory/Ity
 npm install
 gulp compress
