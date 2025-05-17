@@ -1,3 +1,9 @@
+// @ts-nocheck
+export {};
+declare var require: any;
+declare const global: any;
+declare function describe(desc: string, fn: () => void): void;
+declare function it(desc: string, fn: () => any): void;
 const assert = require('assert');
 const { setupDOM } = require('./helpers');
 

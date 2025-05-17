@@ -1,11 +1,16 @@
-let JSDOM;
+// @ts-nocheck
+export {};
+declare var require: any;
+declare const global: any;
+
+let JSDOM: any;
 try {
   ({ JSDOM } = require('jsdom'));
 } catch (e) {
-  ({ JSDOM } = require('../simple-dom'));
+  ({ JSDOM } = require('../../simple-dom'));
 }
 
-exports.setupDOM = function(html = '<!DOCTYPE html><div id="root"></div>') {
+export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') {
   const dom = new JSDOM(html);
   const prevWindow = global.window;
   const prevDocument = global.document;
@@ -17,14 +22,14 @@ exports.setupDOM = function(html = '<!DOCTYPE html><div id="root"></div>') {
   global.NodeList = dom.window.NodeList;
   global.HTMLElement = dom.window.HTMLElement;
   global.HTMLDocument = dom.window.HTMLDocument;
-  require('../Ity.js');
-  return function cleanup() {
+  require('../../Ity.js');
+  return function cleanup(): void {
     global.window = prevWindow;
     global.document = prevDocument;
     global.NodeList = prevNodeList;
     global.HTMLElement = prevHTMLElement;
     global.HTMLDocument = prevHTMLDocument;
     // clear module cache
-    delete require.cache[require.resolve('../Ity.js')];
+    delete require.cache[require.resolve('../../Ity.js')];
   };
-};
+}
