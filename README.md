@@ -7,10 +7,6 @@ A miniscule, dependency free JavaScript MVC
 * Mobile first - no legacy hackery for ie < 10.
 * Great for spinning up small, mobile-specific apps
 
-## To Do
-* Currently no router for fancy SPA style urls
-
-
 ## Installation
 ```
 npm install ity
@@ -77,7 +73,21 @@ const myView = new Ity.View({
 * View.on(eventName, callback) - listen to View instance events and call callback function
 * View.remove() - Remove internal el element and remove view from app
 * View.trigger(eventName, data) - trigger event by name on View instance and optionally pass data
-* View.select(DOMquery) - select DOM elements within set el object. 
+* View.select(DOMquery) - select DOM elements within set el object.
+
+## Router
+* Router.addRoute(pattern, handler) - register a URL pattern and callback. Dynamic segments prefixed with `:` become params.
+* Router.navigate(path) - update the history state and dispatch the matching route.
+* Router.start() - start listening for `popstate` events (called automatically on creation).
+* Router.stop() - stop listening for URL changes.
+
+```ts
+const router = new Ity.Router();
+router.addRoute('/users/:id', params => {
+  console.log('Showing user', params.id);
+});
+router.navigate('/users/5');
+```
 
 ## The Selection Engine and Selector object
 Based on jQuery's DOM querying. Selection is done from within a View instance. 
@@ -136,7 +146,7 @@ For now this will just create ity.min.js and ity.min.js.map in the /dist directo
 ## License
 The MIT License (MIT)
 
-Copyright (c) 2015 Dominic Cocchiarella
+Copyright (c) 2025 Dominic Cocchiarella
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
