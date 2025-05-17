@@ -15,6 +15,18 @@ class Node {
   }
 }
 
+class Event {
+  constructor(type) {
+    this.type = type;
+    this.bubbles = true;
+    this.cancelBubble = false;
+    this.target = null;
+  }
+  stopPropagation() {
+    this.cancelBubble = true;
+  }
+}
+
 class TextNode extends Node {
   constructor(text) {
     super();
@@ -31,6 +43,7 @@ class Element extends Node {
     this.attributes = {};
     this.id = '';
     this.classList = new ClassList();
+    this._listeners = Object.create(null);
   }
   get parentNode() {
     return this.parentElement;
@@ -151,7 +164,22 @@ class Element extends Node {
     }
     return null;
   }
-  addEventListener() {}
+  addEventListener(type, handler) {
+    if (!this._listeners[type]) this._listeners[type] = [];
+    this._listeners[type].push(handler);
+  }
+
+  dispatchEvent(event) {
+    event.target || (event.target = this);
+    if (this._listeners[event.type]) {
+      for (const handler of this._listeners[event.type].slice()) {
+        handler.call(this, event);
+      }
+    }
+    if (event.bubbles !== false && !event.cancelBubble && this.parentElement) {
+      this.parentElement.dispatchEvent(event);
+    }
+  }
   matches(selector) {
     return matchesSelector(this, selector);
   }
@@ -234,7 +262,8 @@ class JSDOM {
       Element,
       HTMLElement: Element,
       HTMLDocument: Document,
-      NodeList: Array
+      NodeList: Array,
+      Event
     };
     this.window.window = this.window;
   }

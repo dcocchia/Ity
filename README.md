@@ -8,7 +8,6 @@ A miniscule, dependency free JavaScript MVC
 * Great for spinning up small, mobile-specific apps
 
 ## To Do
-* More useful event delegation. Currently, views must call _setElement() every time they render new DOM elements
 * Currently no router for fancy SPA style urls
 
 
