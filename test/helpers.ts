@@ -22,6 +22,7 @@ export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') 
   global.NodeList = dom.window.NodeList;
   global.HTMLElement = dom.window.HTMLElement;
   global.HTMLDocument = dom.window.HTMLDocument;
+
   if (!global.window.addEventListener) {
     const listeners: Record<string, Function[]> = {};
     global.window.addEventListener = function (type: string, handler: Function) {
@@ -63,6 +64,7 @@ export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') 
   }
   if (!global.window.HTMLElement.prototype._dispatchPatched) {
     const origDispatch = global.window.HTMLElement.prototype.dispatchEvent;
+    
     global.window.HTMLElement.prototype.dispatchEvent = function (event: any): void {
       event.target || (event.target = this);
       if ((this as any)._listeners && (this as any)._listeners[event.type]) {
