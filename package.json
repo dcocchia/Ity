@@ -4,7 +4,8 @@
   "description": "A miniscule, depedency free JavaScript MVC",
   "main": "Ity.js",
   "scripts": {
-    "test": "node mini-mocha.js test/*.js"
+    "test": "node mini-mocha.js test/*.js",
+    "coverage": "rm -rf coverage && NODE_V8_COVERAGE=coverage node mini-mocha.js test/*.js && node reportCoverage.js"
   },
   "devDependencies": {
     "mocha": "2.1.x",

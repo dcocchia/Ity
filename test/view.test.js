@@ -25,4 +25,25 @@ describe('View functionality', function () {
     assert.strictEqual(document.getElementById('v'), null);
     cleanup();
   });
+  it('binds events and supports _setElement', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="v"><button class="b"></button><span id="src"></span></div>');
+    let clicked = false;
+    const view = new window.Ity.View({
+      el: '#v',
+      name: 'testView',
+      events: {
+        'button': { click: 'onClick' }
+      },
+      onClick: function () { clicked = true; }
+    });
+    view._setElement(document.querySelectorAll('#v'));
+    view._setElement(new window.Ity.SelectorObject([document.getElementById('v')]));
+    view.onClick({});
+    assert(clicked);
+    assert.equal(view.getName(), 'testView');
+    view.select('span', view.select('#v'));
+    view.remove();
+    assert.strictEqual(document.getElementById('v'), null);
+    cleanup();
+  });
 });

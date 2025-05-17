@@ -20,4 +20,17 @@ describe('SelectorObject HTML insertion', function () {
     assert.equal(a.firstElementChild.id, 'c');
     cleanup();
   });
+
+  it('accepts SelectorObject as content', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="target"></div><div id="src"><span class="c"></span></div>');
+    const target = new window.Ity.SelectorObject([document.getElementById('target')]);
+    const src = new window.Ity.SelectorObject([document.getElementById('src')]);
+    target.append(src);
+    target.prepend(src);
+    target.before(src);
+    target.after(src);
+    target.html(src);
+    assert.equal(target.first()[0].id, 'target');
+    cleanup();
+  });
 });

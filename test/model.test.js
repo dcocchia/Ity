@@ -32,4 +32,18 @@ describe('Model basics', function () {
     assert(changed);
     cleanup();
   });
+  it('performs ajax sync via _ajax', function () {
+    const cleanup = setupDOM();
+    const originalXHR = global.XMLHttpRequest;
+    function FakeXHR() {
+      this.open = () => {};
+      this.send = () => { this.status = 200; this.responseText = '{"a":1}'; this.onload(); };
+    }
+    const model = new window.Ity.Model({ url: '/foo' });
+    global.XMLHttpRequest = function () { return new FakeXHR(); };
+    model.sync({ success(resp){ this.data = resp; } });
+    assert.deepEqual(model.get(), {a:1});
+    global.XMLHttpRequest = originalXHR;
+    cleanup();
+  });
 });
