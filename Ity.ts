@@ -415,11 +415,70 @@ declare var define: any;
     }
   }
 
+  interface Route {
+    re: RegExp;
+    keys: string[];
+    handler: (params: Record<string, string>) => void;
+  }
+
+  class Router {
+    private routes: Route[] = [];
+    private listener: () => void;
+
+    constructor() {
+      this.listener = this._checkUrl.bind(this);
+      this.start();
+    }
+
+    addRoute(pattern: string, handler: Route["handler"]): void {
+      const keys: string[] = [];
+      const re = new RegExp(
+        "^" +
+          pattern
+            .replace(/\/?$/, "")
+            .replace(/:[^/]+/g, (m) => {
+              keys.push(m.slice(1));
+              return "([^/]+)";
+            }) +
+          "/?$"
+      );
+      this.routes.push({ re, keys, handler });
+    }
+
+    navigate(path: string): void {
+      window.history.pushState(null, "", path);
+      this._checkUrl();
+    }
+
+    start(): void {
+      window.addEventListener("popstate", this.listener);
+      this._checkUrl();
+    }
+
+    stop(): void {
+      window.removeEventListener("popstate", this.listener);
+    }
+
+    private _checkUrl(): void {
+      const path = window.location.pathname.replace(/\/?$/, "");
+      for (const route of this.routes) {
+        const match = route.re.exec(path);
+        if (match) {
+          const params: Record<string, string> = {};
+          route.keys.forEach((k, i) => (params[k] = match[i + 1]));
+          route.handler(params);
+          break;
+        }
+      }
+    }
+  }
+
   Ity.SelectorObject = SelectorObject;
   Ity.onDOMReady = onDOMReady;
   Ity.Model = Model;
   Ity.View = View;
   Ity.Application = Application;
+  Ity.Router = Router;
 
   if (typeof define === 'function' && (define as any).amd) {
     (define as any)(function () {
