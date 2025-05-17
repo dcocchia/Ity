@@ -4,8 +4,9 @@
   "description": "A miniscule, depedency free JavaScript MVC",
   "main": "Ity.js",
   "scripts": {
-    "test": "node mini-mocha.js test/*.js",
-    "coverage": "rm -rf coverage && NODE_V8_COVERAGE=coverage node mini-mocha.js test/*.js && node reportCoverage.js"
+    "test": "node build/mini-mocha.js test/*.js",
+    "coverage": "rm -rf coverage && NODE_V8_COVERAGE=coverage node build/mini-mocha.js test/*.js && node reportCoverage.js",
+    "pretest": "tsc"
   },
   "devDependencies": {
     "mocha": "2.1.x",
@@ -13,7 +14,9 @@
     "gulp-uglify": "1.2.*",
     "gulp-rename": "1.2.*",
     "gulp-sourcemaps": "1.5.2",
-    "vinyl-buffer": "1.0.0"
+    "vinyl-buffer": "1.0.0",
+    "typescript": "^5.4.2",
+    "ts-node": "^10.9.1"
   },
   "repository": {
     "type": "git",

@@ -5,3 +5,5 @@ npm-debug.log
 *.sublime-project
 /npm-cache/
 .DS_Store
+coverage/
+build/

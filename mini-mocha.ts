@@ -1,13 +1,14 @@
 #!/usr/bin/env node
+declare function require(id: string): any;
+declare const process: any;
 const path = require('path');
-const fs = require('fs');
 
-global.describe = function(desc, fn) {
+(globalThis as any).describe = function(desc: string, fn: () => void): void {
   console.log(desc);
   fn();
 };
 
-global.it = async function(desc, fn) {
+(globalThis as any).it = async function(desc: string, fn: () => Promise<void> | void): Promise<void> {
   try {
     await fn();
     console.log('  \u2714', desc);
@@ -19,6 +20,6 @@ global.it = async function(desc, fn) {
 };
 
 const files = process.argv.slice(2);
-files.forEach(file => {
+files.forEach((file: string) => {
   require(path.resolve(file));
 });
