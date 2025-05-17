@@ -428,39 +428,36 @@
 			}
 		},
 
-		_bindDOMEvents: function(evtObj) {
-			var elmToBind;
+               _bindDOMEvents: function(evtObj) {
+                        if (!this.el || !this.el.isSelectorObject) return;
 
-			for (evtString in evtObj) {
-				if (this.el) {
+                        for (var selector in evtObj) {
+                                for (var evt in evtObj[selector]) {
+                                        this._delegateEvent(selector, evt, this[evtObj[selector][evt]]);
+                                }
+                        }
+                },
 
-					if (this.el.length > 0 && this.el.isSelectorObject) {
-						for (var i = 0; i < this.el.length; i += 1) {
-							elmToBind = this.el[i].querySelectorAll(evtString);
+               _delegateEvent: function(selector, evtName, callback) {
+                        var self = this;
 
-							this._bindNodeElmsEvents(elmToBind, evtObj, evtString);
-						}
-					}
-				}
-			}
-		},
+                        for (var i = 0; i < this.el.length; i++) {
+                                (function(root) {
+                                        root.addEventListener(evtName, function(e) {
+                                                var node = e.target;
 
-		_bindNodeElmsEvents: function(node, evtObj, evtString) {
-			for (var idx = 0; idx < node.length; idx += 1) {
-
-				for (var evt in evtObj[evtString]) {
-					this._bindElmEvent(node[idx], evt, this[evtObj[evtString][evt]]);
-				}
-			}
-		},
-
-		_bindElmEvent: function(elm, DOMEvent, callback) {
-			var self = this;
-
-			elm.addEventListener(DOMEvent, function(e) {
-				callback.call(self, e);
-			});
-		},
+                                                while (node) {
+                                                        if (node.matches && node.matches(selector)) {
+                                                                callback.call(self, e);
+                                                                break;
+                                                        }
+                                                        if (node === root) break;
+                                                        node = node.parentElement;
+                                                }
+                                        });
+                                })(this.el[i]);
+                        }
+                },
 
 		_init: function(opts) {
 			if (this.el) { this._setElement(this.el); }

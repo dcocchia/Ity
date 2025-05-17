@@ -51,4 +51,20 @@ describe('View functionality', function () {
     assert.strictEqual(document.getElementById('v'), null);
     cleanup();
   });
+
+  it('handles events for dynamically added elements', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="v"><div class="c"></div></div>');
+    let clicked = false;
+    const view = new window.Ity.View({
+      el: '#v',
+      events: { '.btn': { click: 'onClick' } },
+      onClick: function () { clicked = true; }
+    });
+    const container = document.querySelector('.c');
+    container.innerHTML = '<button class="btn"></button>';
+    const btn = container.querySelector('button');
+    btn.dispatchEvent(new window.Event('click'));
+    assert(clicked);
+    cleanup();
+  });
 });
