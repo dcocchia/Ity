@@ -267,6 +267,26 @@ declare var define: any;
       (this._events[evtName] ||= []).push({ callback, ctx: context });
     }
 
+    off(evtName?: string, callback?: (data?: unknown) => void, context?: any): void {
+      if (!evtName) {
+        this._events = {};
+        return;
+      }
+      const events = this._events[evtName];
+      if (!events) return;
+      if (!callback) {
+        delete this._events[evtName];
+        return;
+      }
+      for (let i = events.length - 1; i >= 0; i--) {
+        const evt = events[i];
+        if (evt.callback === callback && (context === undefined || evt.ctx === context)) {
+          events.splice(i, 1);
+        }
+      }
+      if (events.length === 0) delete this._events[evtName];
+    }
+
     sync(opts?: Parameters<Model<T>["_ajax"]>[0]): void {
       this._ajax(opts);
     }
@@ -369,6 +389,26 @@ declare var define: any;
 
     on(evtName: string, callback: (data?: unknown) => void, context: any = this): void {
       (this._events[evtName] ||= []).push({ callback, ctx: context });
+    }
+
+    off(evtName?: string, callback?: (data?: unknown) => void, context?: any): void {
+      if (!evtName) {
+        this._events = {};
+        return;
+      }
+      const events = this._events[evtName];
+      if (!events) return;
+      if (!callback) {
+        delete this._events[evtName];
+        return;
+      }
+      for (let i = events.length - 1; i >= 0; i--) {
+        const evt = events[i];
+        if (evt.callback === callback && (context === undefined || evt.ctx === context)) {
+          events.splice(i, 1);
+        }
+      }
+      if (events.length === 0) delete this._events[evtName];
     }
 
     remove(): void {
