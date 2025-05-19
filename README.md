@@ -171,6 +171,17 @@ the minified build works by running:
 npm run test:dist
 ```
 
+## Running tests
+Compile the source files and run the test suite with:
+```bash
+npm test
+```
+This command uses a pretest hook to build the project and then runs the
+Mini Mocha test runner. A coverage report can also be generated with:
+```bash
+npm run coverage
+```
+
 
 ## License
 The MIT License (MIT)
