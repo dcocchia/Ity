@@ -476,12 +476,22 @@ declare var define: any;
     }
 
     private _checkUrl(): void {
-      const path = window.location.pathname.replace(/\/?$/, "");
+      const path = window.location.pathname.replace(/[?#].*$/, "").replace(/\/?$/, "");
       for (const route of this.routes) {
         const match = route.re.exec(path);
         if (match) {
           const params: Record<string, string> = {};
           route.keys.forEach((k, i) => (params[k] = match[i + 1]));
+          const collect = (str: string): void => {
+            str = str.replace(/^[?#]/, "");
+            if (!str) return;
+            const search = new URLSearchParams(str);
+            search.forEach((v, k) => {
+              params[k] = v;
+            });
+          };
+          collect(window.location.search);
+          collect(window.location.hash);
           route.handler(params);
           break;
         }

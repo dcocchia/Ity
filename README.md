@@ -80,6 +80,7 @@ const myView = new Ity.View({
 * Router.navigate(path) - update the history state and dispatch the matching route.
 * Router.start() - start listening for `popstate` events (called automatically on creation).
 * Router.stop() - stop listening for URL changes.
+* Query string (`?foo=bar`) and hash (`#section=2`) parameters are parsed and merged into the handler's params object.
 
 ```ts
 const router = new Ity.Router();
