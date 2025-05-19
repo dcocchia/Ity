@@ -67,4 +67,15 @@ describe('View functionality', function () {
     assert(clicked);
     cleanup();
   });
+
+  it('supports multiple event listeners', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="v"></div>');
+    const view = new window.Ity.View({ el: '#v' });
+    let a = false; let b = false;
+    view.on('foo', () => a = true);
+    view.on('foo', () => b = true);
+    view.trigger('foo');
+    assert(a && b);
+    cleanup();
+  });
 });

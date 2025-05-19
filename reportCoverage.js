@@ -12,15 +12,13 @@ for (const file of fs.readdirSync(coverageDir)) {
   for (const result of data.result) {
     if (!result.url.startsWith('file://')) continue;
     const filePath = url.fileURLToPath(result.url);
-    if (!filePath.startsWith(__dirname)) continue;
+    if (!filePath.startsWith(__dirname) || !filePath.endsWith('Ity.js')) continue;
     for (const fn of result.functions) {
-      for (const range of fn.ranges) {
-        total++;
-        if (range.count > 0) covered++;
-      }
+      total++;
+      if (fn.ranges.some(r => r.count > 0)) covered++;
     }
   }
 }
 
-const pct = 100;
+const pct = total === 0 ? 100 : (covered / total) * 100;
 console.log(`Coverage: ${pct.toFixed(2)}%`);
