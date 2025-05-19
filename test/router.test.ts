@@ -44,4 +44,17 @@ describe('Router', function () {
     assert.equal(count, 3);
     cleanup();
   });
+
+  it('avoids duplicate listeners on repeated start', function () {
+    const cleanup = setupDOM();
+    const router = new window.Ity.Router();
+    let count = 0;
+    router.addRoute('/dup', () => { count++; });
+    router.start();
+    router.start();
+    window.history.pushState(null, '', '/dup');
+    window.dispatchEvent(new window.Event('popstate'));
+    assert.equal(count, 1);
+    cleanup();
+  });
 });

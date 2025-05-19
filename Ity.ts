@@ -191,7 +191,7 @@ declare var define: any;
     public id!: string;
     public data!: T;
     public url!: string;
-    private _events!: Record<string, EventRecord>;
+    private _events!: Record<string, EventRecord[]>;
 
     constructor(opts: Partial<Model<T>> = {}) {
       Object.assign(this, opts);
@@ -264,7 +264,7 @@ declare var define: any;
     }
 
     on(evtName: string, callback: (data?: unknown) => void, context: any = this): void {
-      this._events[evtName] = { callback, ctx: context };
+      (this._events[evtName] ||= []).push({ callback, ctx: context });
     }
 
     sync(opts?: Parameters<Model<T>["_ajax"]>[0]): void {
@@ -272,9 +272,11 @@ declare var define: any;
     }
 
     trigger(evtName: string, data?: unknown): void {
-      const evt = this._events[evtName];
-      if (evt) {
-        evt.callback.call(evt.ctx, data);
+      const evts = this._events[evtName];
+      if (evts) {
+        for (const evt of evts) {
+          evt.callback.call(evt.ctx, data);
+        }
       }
     }
   }
@@ -292,7 +294,7 @@ declare var define: any;
     public app?: Application;
     public name?: string;
     public events!: ViewEvents;
-    private _events!: Record<string, EventRecord>;
+    private _events!: Record<string, EventRecord[]>;
 
     constructor(opts: ViewOptions = {}) {
       Object.assign(this, opts);
@@ -363,7 +365,7 @@ declare var define: any;
     }
 
     on(evtName: string, callback: (data?: unknown) => void, context: any = this): void {
-      this._events[evtName] = { callback, ctx: context };
+      (this._events[evtName] ||= []).push({ callback, ctx: context });
     }
 
     remove(): void {
@@ -372,8 +374,12 @@ declare var define: any;
     }
 
     trigger(evtName: string, data?: unknown): void {
-      const evt = this._events[evtName];
-      if (evt) evt.callback.call(evt.ctx, data);
+      const evts = this._events[evtName];
+      if (evts) {
+        for (const evt of evts) {
+          evt.callback.call(evt.ctx, data);
+        }
+      }
     }
 
     select(selector: string, ctx: HTMLElement | HTMLDocument | SelectorObject = this.el): SelectorObject {
@@ -424,6 +430,7 @@ declare var define: any;
   class Router {
     private routes: Route[] = [];
     private listener: () => void;
+    private started = false;
 
     constructor() {
       this.listener = this._checkUrl.bind(this);
@@ -451,12 +458,18 @@ declare var define: any;
     }
 
     start(): void {
-      window.addEventListener("popstate", this.listener);
+      if (!this.started) {
+        window.addEventListener("popstate", this.listener);
+        this.started = true;
+      }
       this._checkUrl();
     }
 
     stop(): void {
-      window.removeEventListener("popstate", this.listener);
+      if (this.started) {
+        window.removeEventListener("popstate", this.listener);
+        this.started = false;
+      }
     }
 
     private _checkUrl(): void {

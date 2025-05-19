@@ -38,6 +38,18 @@ describe('Model basics', function () {
     assert(changed);
     cleanup();
   });
+
+  it('supports multiple listeners for same event', function () {
+    const cleanup = setupDOM();
+    const model = new window.Ity.Model();
+    let a = false;
+    let b = false;
+    model.on('change', () => a = true);
+    model.on('change', () => b = true);
+    model.set('y', 3);
+    assert(a && b);
+    cleanup();
+  });
   it('performs ajax sync via _ajax', function () {
     const cleanup = setupDOM();
     const originalXHR = global.XMLHttpRequest;
@@ -49,6 +61,28 @@ describe('Model basics', function () {
     global.XMLHttpRequest = function () { return new FakeXHR(); };
     model.sync({ success(resp){ this.data = resp; } });
     assert.deepEqual(model.get(), {a:1});
+    global.XMLHttpRequest = originalXHR;
+    cleanup();
+  });
+
+  it('uses default success and error handlers', function () {
+    const cleanup = setupDOM();
+    const originalXHR = global.XMLHttpRequest;
+    function FakeXHRSuccess() {
+      this.open = () => {};
+      this.send = () => { this.status = 200; this.responseText = '{"z":9}'; this.onload(); };
+    }
+    let model = new window.Ity.Model({ url: '/foo' });
+    global.XMLHttpRequest = function () { return new FakeXHRSuccess(); };
+    model.sync();
+    assert.equal(model.get('z'), 9);
+    function FakeXHRFail() {
+      this.open = () => {};
+      this.send = () => { this.onerror(); };
+    }
+    global.XMLHttpRequest = function () { return new FakeXHRFail(); };
+    model = new window.Ity.Model({ url: '/foo' });
+    model.sync(); // should invoke default error handler
     global.XMLHttpRequest = originalXHR;
     cleanup();
   });
