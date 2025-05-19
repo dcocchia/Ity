@@ -72,6 +72,12 @@ const myView = new Ity.View({
 * Collection.get(id) - return a model by id if present
 * Collection.remove(id) - remove a model from the collection by id
 * Collection.at(index) - return model at a given index
+* Collection.length - number of models in the collection
+* Collection.clear() - remove all models
+* Collection.find(fn) - return the first model matching `fn`
+* Collection.filter(fn) - return an array of models matching `fn`
+* Collection.toJSON() - array of each model's data
+* Collection.fetch(opts) - populate models from an AJAX request
 * Collection.trigger(eventName, data) - trigger event on all models in the collection
 
 ## View

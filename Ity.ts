@@ -466,8 +466,12 @@ declare var define: any;
 
   class Collection<M extends Model = Model> {
     public models: M[] = [];
+    public url!: string;
+    private ModelClass: new () => M;
 
-    constructor(models: M[] = []) {
+    constructor(models: M[] = [], ModelClass: new () => M = Model as any) {
+      this.ModelClass = ModelClass;
+      this.url = "";
       models.forEach((m) => this.add(m));
     }
 
@@ -491,6 +495,73 @@ declare var define: any;
 
     at(index: number): M | undefined {
       return this.models[index];
+    }
+
+    get length(): number {
+      return this.models.length;
+    }
+
+    clear(): void {
+      this.models = [];
+    }
+
+    find(predicate: (m: M) => boolean): M | undefined {
+      for (const m of this.models) {
+        if (predicate(m)) return m;
+      }
+      return undefined;
+    }
+
+    filter(predicate: (m: M) => boolean): M[] {
+      const out: M[] = [];
+      for (const m of this.models) {
+        if (predicate(m)) out.push(m);
+      }
+      return out;
+    }
+
+    toJSON(): any[] {
+      return this.models.map((m) => m.get());
+    }
+
+    protected _ajax(opts: {
+      url?: string;
+      type?: string;
+      success?: (resp: any) => void;
+      error?: (status?: number) => void;
+    } = {}): void {
+      const col = this;
+      const request = new XMLHttpRequest();
+      opts.url ||= this.url;
+      opts.type ||= 'GET';
+      opts.success ||= function () {};
+      opts.error ||= function () {};
+      request.open(opts.type!, opts.url!, true);
+      request.onload = function () {
+        if (request.status >= 200 && request.status < 400) {
+          const resp = JSON.parse(request.responseText);
+          opts.success!.call(col, resp);
+        } else {
+          opts.error!.call(col, request.status);
+        }
+      };
+      request.onerror = function () {
+        opts.error!.call(col);
+      };
+      request.send();
+    }
+
+    fetch(opts: Parameters<Collection<M>["_ajax"]>[0] & { modelClass?: new () => M } = {}): void {
+      opts.success ||= function (this: Collection<M>, resp: any[]) {
+        const ctor = (opts.modelClass || this.ModelClass) as new () => M;
+        this.clear();
+        resp.forEach((d) => {
+          const m = new ctor();
+          (m as any).set(d);
+          this.add(m);
+        });
+      };
+      this._ajax(opts);
     }
 
     trigger(evtName: string, data?: unknown): void {
