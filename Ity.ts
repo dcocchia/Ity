@@ -2,8 +2,9 @@
 // (c) 2025 Dominic Cocchiarella
 // Converted to TypeScript
 declare var define: any;
+declare var module: any;
 
-(function (window: any) {
+const Ity: any = (function (window: any) {
   const Ity: any = { version: "1.0.0" };
 
   const regexps = {
@@ -656,10 +657,16 @@ declare var define: any;
 
   if (typeof define === 'function' && (define as any).amd) {
     (define as any)(function () {
-      window.Ity = Ity;
+      if (typeof window !== 'undefined') (window as any).Ity = Ity;
       return Ity;
     });
-  } else {
-    window.Ity = Ity;
+  } else if (typeof module === 'object' && typeof module.exports !== 'undefined') {
+    module.exports = Ity;
   }
-})(window as any);
+  if (typeof window !== 'undefined') {
+    (window as any).Ity = Ity;
+  }
+  return Ity;
+})(typeof window !== 'undefined' ? window : {} as any);
+
+export default Ity;
