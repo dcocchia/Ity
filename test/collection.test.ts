@@ -74,4 +74,39 @@ describe('Collection', function () {
     global.XMLHttpRequest = originalXHR;
     cleanup();
   });
+
+  it('uses default success and error handlers', function () {
+    const cleanup = setupDOM();
+    const originalXHR = global.XMLHttpRequest;
+    function FakeXHRSuccess() {
+      this.open = () => {};
+      this.send = () => { this.status = 200; this.responseText = '[{"y":3}]'; this.onload(); };
+    }
+    let c = new window.Ity.Collection([], window.Ity.Model);
+    c.url = '/foo';
+    global.XMLHttpRequest = function () { return new FakeXHRSuccess(); };
+    c.fetch();
+    assert.strictEqual(c.length, 1);
+    assert.strictEqual(c.at(0).get('y'), 3);
+
+    function FakeXHRFail() { this.open = () => {}; this.send = () => { this.onerror(); }; }
+    c = new window.Ity.Collection([], window.Ity.Model);
+    c.url = '/foo';
+    global.XMLHttpRequest = function () { return new FakeXHRFail(); };
+    c.fetch();
+    assert.strictEqual(c.length, 0);
+    global.XMLHttpRequest = originalXHR;
+    cleanup();
+  });
+
+  it('internal _ajax defaults work', function () {
+    const cleanup = setupDOM();
+    const originalXHR = global.XMLHttpRequest;
+    function FakeXHR() { this.open = () => {}; this.send = () => { this.status = 200; this.responseText = '[]'; this.onload(); }; }
+    const c = new window.Ity.Collection([], window.Ity.Model);
+    global.XMLHttpRequest = function () { return new FakeXHR(); };
+    (c as any)._ajax();
+    global.XMLHttpRequest = originalXHR;
+    cleanup();
+  });
 });
