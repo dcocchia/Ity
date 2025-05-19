@@ -20,5 +20,9 @@ for (const file of fs.readdirSync(coverageDir)) {
   }
 }
 
-const pct = total === 0 ? 100 : (covered / total) * 100;
+const pct = total === 0 ? 0 : (covered / total) * 100;
 console.log(`Coverage: ${pct.toFixed(2)}%`);
+if (pct < 100) {
+  console.error('Coverage below 100%');
+  process.exitCode = 1;
+}
