@@ -95,4 +95,18 @@ describe('Model basics', function () {
     global.XMLHttpRequest = originalXHR;
     cleanup();
   });
+
+  it('off removes event listeners', function () {
+    const cleanup = setupDOM();
+    const model = new window.Ity.Model();
+    let count = 0;
+    function cb() { count++; }
+    model.on('change', cb);
+    model.trigger('change');
+    assert.equal(count, 1);
+    model.off('change', cb);
+    model.trigger('change');
+    assert.equal(count, 1);
+    cleanup();
+  });
 });

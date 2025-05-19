@@ -16,6 +16,7 @@ npm install ity
 ```ts
 const myApp = new Ity.Application();
 const myModel = new Ity.Model();
+const myCollection = new Ity.Collection([myModel]);
 const myView = new Ity.View({
   el: '.someElement',
   app: myApp,
@@ -62,8 +63,22 @@ const myView = new Ity.View({
 * Model.unSet(someDataPoint) - clear out valye of interanl data objecy by key
 * Model.clear() - clear entire internal data objecy
 * Model.on(eventName, callback) - listen to Model instance events and call callback function
+* Model.off(eventName?, callback?) - remove Model instance event listener(s)
 * Model.sync(options) - sync data in internal data object. Optionally pass options hash for url, type, success, error
 * Model.trigger(eventName, data) - trigger event by name on Model instance and optionally pass data
+
+## Collection
+* Collection.add(model) - add an Ity.Model instance to the collection
+* Collection.get(id) - return a model by id if present
+* Collection.remove(id) - remove a model from the collection by id
+* Collection.at(index) - return model at a given index
+* Collection.length - number of models in the collection
+* Collection.clear() - remove all models
+* Collection.find(fn) - return the first model matching `fn`
+* Collection.filter(fn) - return an array of models matching `fn`
+* Collection.toJSON() - array of each model's data
+* Collection.fetch(opts) - populate models from an AJAX request
+* Collection.trigger(eventName, data) - trigger event on all models in the collection
 
 ## View
 * View.initialize(options) - called on instantiation of View instances, optional options hash can be passed
@@ -71,6 +86,7 @@ const myView = new Ity.View({
 * View.get(key) - return attribute of view by key String
 * View.set(key, value) - set attribute of view to passed value
 * View.on(eventName, callback) - listen to View instance events and call callback function
+* View.off(eventName?, callback?) - remove View instance event listener(s)
 * View.remove() - Remove internal el element and remove view from app
 * View.trigger(eventName, data) - trigger event by name on View instance and optionally pass data
 * View.select(DOMquery) - select DOM elements within set el object.
@@ -80,6 +96,7 @@ const myView = new Ity.View({
 * Router.navigate(path) - update the history state and dispatch the matching route.
 * Router.start() - start listening for `popstate` events (called automatically on creation).
 * Router.stop() - stop listening for URL changes.
+* Query string (`?foo=bar`) and hash (`#section=2`) parameters are parsed and merged into the handler's params object.
 
 ```ts
 const router = new Ity.Router();
@@ -140,7 +157,8 @@ npm install
 npm run build
 ```
 
-This creates `dist/ity.js`, `dist/ity.min.js` and their source maps. You can verify
+This creates `dist/ity.js`, `dist/ity.min.js` and module builds in
+`dist/ity.esm.js` and `dist/ity.cjs.js`, along with their source maps. You can verify
 the minified build works by running:
 ```bash
 npm run test:dist

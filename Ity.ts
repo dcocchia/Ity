@@ -2,8 +2,9 @@
 // (c) 2025 Dominic Cocchiarella
 // Converted to TypeScript
 declare var define: any;
+declare var module: any;
 
-(function (window: any) {
+const Ity: any = (function (window: any) {
   const Ity: any = { version: "1.0.0" };
 
   const regexps = {
@@ -267,6 +268,26 @@ declare var define: any;
       (this._events[evtName] ||= []).push({ callback, ctx: context });
     }
 
+    off(evtName?: string, callback?: (data?: unknown) => void, context?: any): void {
+      if (!evtName) {
+        this._events = {};
+        return;
+      }
+      const events = this._events[evtName];
+      if (!events) return;
+      if (!callback) {
+        delete this._events[evtName];
+        return;
+      }
+      for (let i = events.length - 1; i >= 0; i--) {
+        const evt = events[i];
+        if (evt.callback === callback && (context === undefined || evt.ctx === context)) {
+          events.splice(i, 1);
+        }
+      }
+      if (events.length === 0) delete this._events[evtName];
+    }
+
     sync(opts?: Parameters<Model<T>["_ajax"]>[0]): void {
       this._ajax(opts);
     }
@@ -371,6 +392,26 @@ declare var define: any;
       (this._events[evtName] ||= []).push({ callback, ctx: context });
     }
 
+    off(evtName?: string, callback?: (data?: unknown) => void, context?: any): void {
+      if (!evtName) {
+        this._events = {};
+        return;
+      }
+      const events = this._events[evtName];
+      if (!events) return;
+      if (!callback) {
+        delete this._events[evtName];
+        return;
+      }
+      for (let i = events.length - 1; i >= 0; i--) {
+        const evt = events[i];
+        if (evt.callback === callback && (context === undefined || evt.ctx === context)) {
+          events.splice(i, 1);
+        }
+      }
+      if (events.length === 0) delete this._events[evtName];
+    }
+
     remove(): void {
       this.el.remove();
       if (this.app) this.app.removeView(this.id);
@@ -420,6 +461,113 @@ declare var define: any;
     trigger(evtName: string, data?: unknown): void {
       for (const view of this.views) {
         view.trigger(evtName, data);
+      }
+    }
+  }
+
+  class Collection<M extends Model = Model> {
+    public models: M[] = [];
+    public url!: string;
+    private ModelClass: new () => M;
+
+    constructor(models: M[] = [], ModelClass: new () => M = Model as any) {
+      this.ModelClass = ModelClass;
+      this.url = "";
+      models.forEach((m) => this.add(m));
+    }
+
+    get(id: string): M | undefined {
+      for (const model of this.models) {
+        if (model.id === id) return model;
+      }
+      return undefined;
+    }
+
+    add(model: M): void {
+      if (model instanceof Model) this.models.push(model);
+    }
+
+    remove(id: string | M): void {
+      const model = typeof id === 'string' ? this.get(id) : id;
+      if (!model) return;
+      const idx = this.models.indexOf(model as M);
+      if (idx >= 0) this.models.splice(idx, 1);
+    }
+
+    at(index: number): M | undefined {
+      return this.models[index];
+    }
+
+    get length(): number {
+      return this.models.length;
+    }
+
+    clear(): void {
+      this.models = [];
+    }
+
+    find(predicate: (m: M) => boolean): M | undefined {
+      for (const m of this.models) {
+        if (predicate(m)) return m;
+      }
+      return undefined;
+    }
+
+    filter(predicate: (m: M) => boolean): M[] {
+      const out: M[] = [];
+      for (const m of this.models) {
+        if (predicate(m)) out.push(m);
+      }
+      return out;
+    }
+
+    toJSON(): any[] {
+      return this.models.map((m) => m.get());
+    }
+
+    protected _ajax(opts: {
+      url?: string;
+      type?: string;
+      success?: (resp: any) => void;
+      error?: (status?: number) => void;
+    } = {}): void {
+      const col = this;
+      const request = new XMLHttpRequest();
+      opts.url ||= this.url;
+      opts.type ||= 'GET';
+      opts.success ||= function () {};
+      opts.error ||= function () {};
+      request.open(opts.type!, opts.url!, true);
+      request.onload = function () {
+        if (request.status >= 200 && request.status < 400) {
+          const resp = JSON.parse(request.responseText);
+          opts.success!.call(col, resp);
+        } else {
+          opts.error!.call(col, request.status);
+        }
+      };
+      request.onerror = function () {
+        opts.error!.call(col);
+      };
+      request.send();
+    }
+
+    fetch(opts: Parameters<Collection<M>["_ajax"]>[0] & { modelClass?: new () => M } = {}): void {
+      opts.success ||= function (this: Collection<M>, resp: any[]) {
+        const ctor = (opts.modelClass || this.ModelClass) as new () => M;
+        this.clear();
+        resp.forEach((d) => {
+          const m = new ctor();
+          (m as any).set(d);
+          this.add(m);
+        });
+      };
+      this._ajax(opts);
+    }
+
+    trigger(evtName: string, data?: unknown): void {
+      for (const model of this.models) {
+        model.trigger(evtName, data);
       }
     }
   }
@@ -476,12 +624,22 @@ declare var define: any;
     }
 
     private _checkUrl(): void {
-      const path = window.location.pathname.replace(/\/?$/, "");
+      const path = window.location.pathname.replace(/[?#].*$/, "").replace(/\/?$/, "");
       for (const route of this.routes) {
         const match = route.re.exec(path);
         if (match) {
           const params: Record<string, string> = {};
           route.keys.forEach((k, i) => (params[k] = match[i + 1]));
+          const collect = (str: string): void => {
+            str = str.replace(/^[?#]/, "");
+            if (!str) return;
+            const search = new URLSearchParams(str);
+            search.forEach((v, k) => {
+              params[k] = v;
+            });
+          };
+          collect(window.location.search);
+          collect(window.location.hash);
           route.handler(params);
           break;
         }
@@ -494,14 +652,21 @@ declare var define: any;
   Ity.Model = Model;
   Ity.View = View;
   Ity.Application = Application;
+  Ity.Collection = Collection;
   Ity.Router = Router;
 
   if (typeof define === 'function' && (define as any).amd) {
     (define as any)(function () {
-      window.Ity = Ity;
+      if (typeof window !== 'undefined') (window as any).Ity = Ity;
       return Ity;
     });
-  } else {
-    window.Ity = Ity;
+  } else if (typeof module === 'object' && typeof module.exports !== 'undefined') {
+    module.exports = Ity;
   }
-})(window as any);
+  if (typeof window !== 'undefined') {
+    (window as any).Ity = Ity;
+  }
+  return Ity;
+})(typeof window !== 'undefined' ? window : {} as any);
+
+export default Ity;

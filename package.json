@@ -2,7 +2,12 @@
   "name": "ity",
   "version": "1.0.0",
   "description": "A miniscule, depedency free JavaScript MVC",
-  "main": "Ity.js",
+  "main": "dist/ity.cjs.js",
+  "module": "dist/ity.esm.js",
+  "exports": {
+    "import": "./dist/ity.esm.js",
+    "require": "./dist/ity.cjs.js"
+  },
   "scripts": {
     "test": "node build/mini-mocha.js build/test/*.js",
     "coverage": "rm -rf coverage && NODE_V8_COVERAGE=coverage node build/mini-mocha.js build/test/*.js && node reportCoverage.js",
