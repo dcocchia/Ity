@@ -79,6 +79,18 @@ describe('View functionality', function () {
     cleanup();
   });
 
+  it('off removes view event listeners', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="v"></div>');
+    const view = new window.Ity.View({ el: '#v' });
+    let called = false;
+    function cb() { called = true; }
+    view.on('bar', cb);
+    view.off('bar', cb);
+    view.trigger('bar');
+    assert.strictEqual(called, false);
+    cleanup();
+  });
+
   it('delegates focus events using capture', function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="v"><input id="i"></div>');
     let focused = false;

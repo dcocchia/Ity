@@ -62,6 +62,7 @@ const myView = new Ity.View({
 * Model.unSet(someDataPoint) - clear out valye of interanl data objecy by key
 * Model.clear() - clear entire internal data objecy
 * Model.on(eventName, callback) - listen to Model instance events and call callback function
+* Model.off(eventName?, callback?) - remove Model instance event listener(s)
 * Model.sync(options) - sync data in internal data object. Optionally pass options hash for url, type, success, error
 * Model.trigger(eventName, data) - trigger event by name on Model instance and optionally pass data
 
@@ -71,6 +72,7 @@ const myView = new Ity.View({
 * View.get(key) - return attribute of view by key String
 * View.set(key, value) - set attribute of view to passed value
 * View.on(eventName, callback) - listen to View instance events and call callback function
+* View.off(eventName?, callback?) - remove View instance event listener(s)
 * View.remove() - Remove internal el element and remove view from app
 * View.trigger(eventName, data) - trigger event by name on View instance and optionally pass data
 * View.select(DOMquery) - select DOM elements within set el object.
