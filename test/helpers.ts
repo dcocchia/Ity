@@ -44,12 +44,15 @@ export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') 
       stack: ["/"],
       pushState: function (_s: any, _t: any, path: string) {
         this.stack.push(path);
-        global.window.location.pathname = path;
+        const url = new URL(path, "http://ity.local");
+        global.window.location.pathname = url.pathname;
+        global.window.location.search = url.search;
+        global.window.location.hash = url.hash;
       },
     } as any;
   }
   if (!global.window.location) {
-    global.window.location = { pathname: "/" } as any;
+    global.window.location = { pathname: "/", search: "", hash: "" } as any;
   }
   if (!global.window.HTMLElement.prototype.getAttribute) {
     global.window.HTMLElement.prototype.getAttribute = function (name: string): any {

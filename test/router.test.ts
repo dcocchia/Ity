@@ -57,4 +57,14 @@ describe('Router', function () {
     assert.equal(count, 1);
     cleanup();
   });
+
+  it('parses query and hash parameters', function () {
+    const cleanup = setupDOM();
+    const router = new window.Ity.Router();
+    let params: any;
+    router.addRoute('/users/:id', (p) => { params = p; });
+    router.navigate('/users/7?foo=bar#baz=qux');
+    assert.deepStrictEqual(params, { id: '7', foo: 'bar', baz: 'qux' });
+    cleanup();
+  });
 });
