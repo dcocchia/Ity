@@ -38,4 +38,19 @@ describe('SelectorObject HTML insertion', function () {
     assert.equal(target.first()[0].id, 'target');
     cleanup();
   });
+
+  it('html with multiple elements replaces correctly', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="target"></div><div class="one"></div><div class="two"></div>');
+    const target = new window.Ity.SelectorObject([document.getElementById('target')]);
+    const multi = new window.Ity.SelectorObject([
+      document.querySelector('.one'),
+      document.querySelector('.two'),
+    ]);
+    target.html(multi);
+    const children = target.first()[0].children;
+    assert.equal(children.length, 2);
+    assert(children[0].classList.contains('one'));
+    assert(children[1].classList.contains('two'));
+    cleanup();
+  });
 });

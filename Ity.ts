@@ -157,18 +157,18 @@ declare var define: any;
       for (const node of this.nodes) {
         if (!isSelectorObject) {
           const html = (content as HTMLElement).outerHTML ?? String(content);
-          if (position !== 'replace') {
-            node.insertAdjacentHTML(position as InsertPosition, html);
-          } else {
+          if (position === 'replace') {
             node.innerHTML = html;
+          } else {
+            node.insertAdjacentHTML(position as InsertPosition, html);
           }
         } else {
-          for (const selNode of content as SelectorObject) {
-            const html = selNode.outerHTML;
-            if (position !== 'replace') {
+          const htmls = Array.from(content as SelectorObject).map((selNode) => selNode.outerHTML);
+          if (position === 'replace') {
+            node.innerHTML = htmls.join('');
+          } else {
+            for (const html of htmls) {
               node.insertAdjacentHTML(position as InsertPosition, html);
-            } else {
-              node.innerHTML = html;
             }
           }
         }
