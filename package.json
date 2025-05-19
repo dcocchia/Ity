@@ -14,7 +14,7 @@
   },
   "engineStrict": true,
   "scripts": {
-    "test": "npm run coverage",
+    "test": "jest",
     "coverage": "rm -rf coverage && NODE_V8_COVERAGE=coverage node build/mini-mocha.js build/test/*.js && node reportCoverage.js",
     "pretest": "tsc && cp build/Ity.js Ity.js",
     "build": "rollup -c",
@@ -24,6 +24,8 @@
     "@rollup/plugin-terser": "^0.4.4",
     "@rollup/plugin-typescript": "^11.1.0",
     "@types/node": "^20",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
     "mocha": "^11.3.0",
     "rollup": "^4.17.0",
     "rollup-plugin-dts": "^6.1.0",
