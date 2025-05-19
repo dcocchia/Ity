@@ -321,14 +321,17 @@ declare var define: any;
 
     private _bindDOMEvents(evtObj: ViewEvents): void {
       if (!this.el || !this.el.isSelectorObject) return;
+      const captureEvents = ["focus", "blur"];
       for (const selector in evtObj) {
         for (const evt in evtObj[selector]) {
-          this._delegateEvent(selector, evt, (this as any)[evtObj[selector][evt]]);
+          const callback = (this as any)[evtObj[selector][evt]];
+          const capture = captureEvents.includes(evt);
+          this._delegateEvent(selector, evt, callback, capture);
         }
       }
     }
 
-    private _delegateEvent(selector: string, evtName: string, callback: (e: Event) => void): void {
+    private _delegateEvent(selector: string, evtName: string, callback: (e: Event) => void, capture = false): void {
       for (const root of this.el) {
         root.addEventListener(evtName, (e: Event) => {
           let node: HTMLElement | null = e.target as HTMLElement;
@@ -340,7 +343,7 @@ declare var define: any;
             if (node === root) break;
             node = node.parentElement;
           }
-        });
+        }, capture);
       }
     }
 
