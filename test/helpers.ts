@@ -79,7 +79,8 @@ export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') 
     };
     global.window.HTMLElement.prototype._dispatchPatched = true;
   }
-  require('../../Ity.js');
+  const ityPath = process.env.ITY_FILE || '../../Ity.js';
+  require(ityPath);
   return function cleanup(): void {
     global.window = prevWindow;
     global.document = prevDocument;
@@ -87,6 +88,6 @@ export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') 
     global.HTMLElement = prevHTMLElement;
     global.HTMLDocument = prevHTMLDocument;
     // clear module cache
-    delete require.cache[require.resolve('../../Ity.js')];
+    delete require.cache[require.resolve(ityPath)];
   };
 }

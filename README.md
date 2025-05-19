@@ -137,10 +137,14 @@ Once you have the repository cloned:
 ```bash
 cd your/directory/Ity
 npm install
-gulp compress
+npm run build
 ```
 
-For now this will just create ity.min.js and ity.min.js.map in the /dist directory.
+This creates `dist/ity.js`, `dist/ity.min.js` and their source maps. You can verify
+the minified build works by running:
+```bash
+npm run test:dist
+```
 
 
 ## License
