@@ -9,6 +9,10 @@
     "import": "./dist/ity.esm.js",
     "require": "./dist/ity.cjs.js"
   },
+  "engines": {
+    "node": ">=20"
+  },
+  "engineStrict": true,
   "scripts": {
     "test": "npm run coverage",
     "coverage": "rm -rf coverage && NODE_V8_COVERAGE=coverage node build/mini-mocha.js build/test/*.js && node reportCoverage.js",
