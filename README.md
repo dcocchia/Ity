@@ -164,7 +164,8 @@ npm run build
 ```
 
 This creates `dist/ity.js`, `dist/ity.min.js` and module builds in
-`dist/ity.esm.js` and `dist/ity.cjs.js`, along with their source maps. You can verify
+`dist/ity.esm.js` and `dist/ity.cjs.js`, along with their source maps. A
+declaration file `dist/ity.d.ts` is also generated. You can verify
 the minified build works by running:
 ```bash
 npm run test:dist

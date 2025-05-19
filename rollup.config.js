@@ -1,5 +1,6 @@
 import typescript from '@rollup/plugin-typescript';
 import { terser } from 'rollup-plugin-terser';
+import dts from 'rollup-plugin-dts';
 
 export default [
   {
@@ -19,6 +20,14 @@ export default [
       format: 'iife',
       name: 'Ity',
       sourcemap: true
+    }
+  },
+  {
+    input: 'Ity.ts',
+    plugins: [dts()],
+    output: {
+      file: 'dist/ity.d.ts',
+      format: 'es'
     }
   }
 ];

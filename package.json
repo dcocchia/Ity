@@ -4,6 +4,7 @@
   "description": "A miniscule, depedency free JavaScript MVC",
   "main": "dist/ity.cjs.js",
   "module": "dist/ity.esm.js",
+  "types": "dist/ity.d.ts",
   "exports": {
     "import": "./dist/ity.esm.js",
     "require": "./dist/ity.cjs.js"
@@ -21,7 +22,8 @@
     "ts-node": "^10.9.1",
     "rollup": "^4.17.0",
     "@rollup/plugin-typescript": "^11.1.0",
-    "rollup-plugin-terser": "^7.0.2"
+    "rollup-plugin-terser": "^7.0.2",
+    "rollup-plugin-dts": "^6.1.0"
   },
   "repository": {
     "type": "git",
