@@ -15,8 +15,8 @@
   "engineStrict": true,
   "scripts": {
     "test": "jest",
-    "coverage": "rm -rf coverage && NODE_V8_COVERAGE=coverage node build/mini-mocha.js build/test/*.js && node reportCoverage.js",
-    "pretest": "tsc && cp build/Ity.js Ity.js",
+    "pretest": "tsc -p tsconfig.json && cp build/Ity.js Ity.js",
+    "coverage": "jest --coverage",
     "build": "rollup -c",
     "test:dist": "ITY_FILE=dist/ity.min.js npm test"
   },
@@ -26,7 +26,6 @@
     "@types/node": "^20",
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
-    "mocha": "^11.3.0",
     "rollup": "^4.17.0",
     "rollup-plugin-dts": "^6.1.0",
     "ts-node": "^10.9.1",
