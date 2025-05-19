@@ -10,7 +10,7 @@
     "require": "./dist/ity.cjs.js"
   },
   "scripts": {
-    "test": "node build/mini-mocha.js build/test/*.js",
+    "test": "npm run coverage",
     "coverage": "rm -rf coverage && NODE_V8_COVERAGE=coverage node build/mini-mocha.js build/test/*.js && node reportCoverage.js",
     "pretest": "tsc && cp build/Ity.js Ity.js",
     "build": "rollup -c",
