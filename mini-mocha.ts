@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-declare function require(id: string): any;
-declare const process: any;
-const path = require('path');
+import path from 'path';
 
 (globalThis as any).describe = function(desc: string, fn: () => void): void {
   console.log(desc);
