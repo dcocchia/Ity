@@ -424,6 +424,42 @@ declare var define: any;
     }
   }
 
+  class Collection<M extends Model = Model> {
+    public models: M[] = [];
+
+    constructor(models: M[] = []) {
+      models.forEach((m) => this.add(m));
+    }
+
+    get(id: string): M | undefined {
+      for (const model of this.models) {
+        if (model.id === id) return model;
+      }
+      return undefined;
+    }
+
+    add(model: M): void {
+      if (model instanceof Model) this.models.push(model);
+    }
+
+    remove(id: string | M): void {
+      const model = typeof id === 'string' ? this.get(id) : id;
+      if (!model) return;
+      const idx = this.models.indexOf(model as M);
+      if (idx >= 0) this.models.splice(idx, 1);
+    }
+
+    at(index: number): M | undefined {
+      return this.models[index];
+    }
+
+    trigger(evtName: string, data?: unknown): void {
+      for (const model of this.models) {
+        model.trigger(evtName, data);
+      }
+    }
+  }
+
   interface Route {
     re: RegExp;
     keys: string[];
@@ -494,6 +530,7 @@ declare var define: any;
   Ity.Model = Model;
   Ity.View = View;
   Ity.Application = Application;
+  Ity.Collection = Collection;
   Ity.Router = Router;
 
   if (typeof define === 'function' && (define as any).amd) {

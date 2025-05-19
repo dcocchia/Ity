@@ -16,6 +16,7 @@ npm install ity
 ```ts
 const myApp = new Ity.Application();
 const myModel = new Ity.Model();
+const myCollection = new Ity.Collection([myModel]);
 const myView = new Ity.View({
   el: '.someElement',
   app: myApp,
@@ -64,6 +65,13 @@ const myView = new Ity.View({
 * Model.on(eventName, callback) - listen to Model instance events and call callback function
 * Model.sync(options) - sync data in internal data object. Optionally pass options hash for url, type, success, error
 * Model.trigger(eventName, data) - trigger event by name on Model instance and optionally pass data
+
+## Collection
+* Collection.add(model) - add an Ity.Model instance to the collection
+* Collection.get(id) - return a model by id if present
+* Collection.remove(id) - remove a model from the collection by id
+* Collection.at(index) - return model at a given index
+* Collection.trigger(eventName, data) - trigger event on all models in the collection
 
 ## View
 * View.initialize(options) - called on instantiation of View instances, optional options hash can be passed
