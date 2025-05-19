@@ -252,7 +252,7 @@ declare var define: any;
     }
 
     unSet(attr: keyof T): void {
-      if (this.data && (this.data as any)[attr] !== undefined) {
+      if (this.data && Object.prototype.hasOwnProperty.call(this.data, attr)) {
         delete (this.data as any)[attr];
         this.trigger("change", this.data);
       }
