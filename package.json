@@ -6,17 +6,17 @@
   "scripts": {
     "test": "node build/mini-mocha.js build/test/*.js",
     "coverage": "rm -rf coverage && NODE_V8_COVERAGE=coverage node build/mini-mocha.js build/test/*.js && node reportCoverage.js",
-    "pretest": "tsc && cp build/Ity.js Ity.js"
+    "pretest": "tsc && cp build/Ity.js Ity.js",
+    "build": "rollup -c",
+    "test:dist": "ITY_FILE=dist/ity.min.js npm test"
   },
   "devDependencies": {
     "mocha": "2.1.x",
-    "gulp": "3.*",
-    "gulp-uglify": "1.2.*",
-    "gulp-rename": "1.2.*",
-    "gulp-sourcemaps": "1.5.2",
-    "vinyl-buffer": "1.0.0",
     "typescript": "^5.4.2",
-    "ts-node": "^10.9.1"
+    "ts-node": "^10.9.1",
+    "rollup": "^4.17.0",
+    "@rollup/plugin-typescript": "^11.1.0",
+    "rollup-plugin-terser": "^7.0.2"
   },
   "repository": {
     "type": "git",
