@@ -48,6 +48,12 @@ const myView = new Ity.View({
 
   // ... more click, hover, focus events from events hash
 });
+
+const router = new Ity.Router();
+router.addRoute('/users/:id', params => {
+  console.log('Showing user', params.id);
+});
+router.navigate('/users/5');
 ```
 ## App
 
