@@ -12,7 +12,6 @@
   "engines": {
     "node": ">=20"
   },
-  "engineStrict": true,
   "scripts": {
     "test": "jest",
     "pretest": "tsc -p tsconfig.json && cp build/Ity.js Ity.js",
