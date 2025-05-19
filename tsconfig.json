@@ -7,7 +7,9 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "lib": ["ES2020", "DOM"],
-    "outDir": "build"
+    "outDir": "build",
+    "declaration": true,
+    "declarationDir": "types"
   },
   "include": ["**/*.ts"]
 }
