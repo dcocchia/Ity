@@ -78,4 +78,18 @@ describe('View functionality', function () {
     assert(a && b);
     cleanup();
   });
+
+  it('delegates focus events using capture', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="v"><input id="i"></div>');
+    let focused = false;
+    const view = new window.Ity.View({
+      el: '#v',
+      events: { '#i': { focus: 'onFocus' } },
+      onFocus: function () { focused = true; }
+    });
+    const inp = document.getElementById('i');
+    inp.dispatchEvent(new window.Event('focus'));
+    assert(focused);
+    cleanup();
+  });
 });
