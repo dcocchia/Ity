@@ -29,6 +29,15 @@ describe('Model basics', function () {
     cleanup();
   });
 
+  it('unSet removes attributes set to undefined', function () {
+    const cleanup = setupDOM();
+    const model = new window.Ity.Model();
+    model.set('x', undefined);
+    model.unSet('x');
+    assert.strictEqual('x' in model.get(), false);
+    cleanup();
+  });
+
   it('triggers change events', function () {
     const cleanup = setupDOM();
     const model = new window.Ity.Model();
