@@ -28,4 +28,13 @@ describe('SelectorObject class manipulation', function () {
     assert(!selector.hasClass('bar'));
     cleanup();
   });
+
+  it('hasClass returns false for invalid input', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="el"></div>');
+    const div = document.getElementById('el');
+    const selector = new window.Ity.SelectorObject([div]);
+    assert.strictEqual(selector.hasClass(''), false);
+    assert.strictEqual(selector.hasClass('two words'), false);
+    cleanup();
+  });
 });

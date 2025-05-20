@@ -632,11 +632,11 @@ const Ity: any = (function (window: any) {
           route.keys.forEach((k, i) => (params[k] = match[i + 1]));
           const collect = (str: string): void => {
             str = str.replace(/^[?#]/, "");
-            if (!str) return;
-            const search = new URLSearchParams(str);
-            search.forEach((v, k) => {
-              params[k] = v;
-            });
+          if (!str) return;
+          const search = new URLSearchParams(str);
+          search.forEach((v, k) => {
+            params[k] = v;
+          });
           };
           collect(window.location.search);
           collect(window.location.hash);

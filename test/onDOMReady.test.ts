@@ -14,4 +14,14 @@ describe('Ity.onDOMReady', function () {
     assert(ready);
     cleanup();
   });
+
+  it('waits for DOMContentLoaded when loading', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div></div>');
+    Object.defineProperty(document, 'readyState', { value: 'loading', configurable: true });
+    let ready = false;
+    window.Ity.onDOMReady(() => ready = true);
+    document.dispatchEvent(new window.Event('DOMContentLoaded'));
+    assert(ready);
+    cleanup();
+  });
 });
