@@ -23,6 +23,15 @@ export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') 
   global.HTMLElement = dom.window.HTMLElement;
   global.HTMLDocument = dom.window.HTMLDocument;
 
+  // jsdom starts with readyState 'loading' and never fires DOMContentLoaded
+  // synchronously. Force a ready state of complete and dispatch the event so
+  // onDOMReady callbacks execute immediately in tests.
+  if (global.document.readyState === 'loading') {
+    Object.defineProperty(global.document, 'readyState', { value: 'complete' });
+    const evt = new global.window.Event('DOMContentLoaded');
+    global.document.dispatchEvent(evt);
+  }
+
   if (!global.window.addEventListener) {
     const listeners: Record<string, Function[]> = {};
     global.window.addEventListener = function (type: string, handler: Function) {
