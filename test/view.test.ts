@@ -63,7 +63,7 @@ describe('View functionality', function () {
     const container = document.querySelector('.c');
     container.innerHTML = '<button class="btn"></button>';
     const btn = container.querySelector('button');
-    btn.dispatchEvent(new window.Event('click'));
+    btn.dispatchEvent(new window.Event('click', { bubbles: true }));
     assert(clicked);
     cleanup();
   });

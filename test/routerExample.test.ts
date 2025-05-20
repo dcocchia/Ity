@@ -49,7 +49,7 @@ describe('Router example logic', function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="routerApp"><button class="homeLink"></button><button class="userLink" data-calc-id="1"></button><div class="content"></div></div>');
     const { view } = createRouterView(window.Ity);
     const btn = document.querySelector('.homeLink') as HTMLElement;
-    btn.dispatchEvent(new window.Event('click'));
+    btn.dispatchEvent(new window.Event('click', { bubbles: true }));
     assert.strictEqual(view.model.get('page'), 'Home');
     cleanup();
   });
@@ -58,7 +58,7 @@ describe('Router example logic', function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="routerApp"><button class="homeLink"></button><button class="userLink" data-calc-id="5"></button><div class="content"></div></div>');
     const { view } = createRouterView(window.Ity);
     const btn = document.querySelector('.userLink') as HTMLElement;
-    btn.dispatchEvent(new window.Event('click'));
+    btn.dispatchEvent(new window.Event('click', { bubbles: true }));
     assert.strictEqual(view.model.get('page'), 'User 5');
     cleanup();
   });
