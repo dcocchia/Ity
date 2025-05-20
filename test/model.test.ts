@@ -123,6 +123,19 @@ describe('Model basics', function () {
     cleanup();
   });
 
+  it('off with event name only removes all callbacks', function () {
+    const cleanup = setupDOM();
+    const model = new window.Ity.Model();
+    let called = false;
+    function cb() { called = true; }
+    model.on('foo', cb);
+    model.on('foo', () => {});
+    model.off('foo');
+    model.trigger('foo');
+    assert.strictEqual(called, false);
+    cleanup();
+  });
+
   it('_ajax error paths invoke error callback', function () {
     const cleanup = setupDOM();
     const originalXHR = global.XMLHttpRequest;

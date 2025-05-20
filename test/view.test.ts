@@ -104,10 +104,35 @@ describe('View functionality', function () {
     cleanup();
   });
 
+  it('off with event name only removes callbacks', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="v"></div>');
+    const view = new window.Ity.View({ el: '#v' });
+    let called = false;
+    function cb() { called = true; }
+    view.on('foo', cb);
+    view.on('foo', () => {});
+    view.off('foo');
+    view.trigger('foo');
+    assert.strictEqual(called, false);
+    cleanup();
+  });
+
   it('_setElement throws on invalid selector', function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="v"></div>');
     const view = new window.Ity.View();
     assert.throws(() => (view as any)._setElement(5 as any));
+    cleanup();
+  });
+
+  it('_setElement handles HTMLElement and select accepts HTMLElement context', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="v"><span class="x"></span></div>');
+    const view = new window.Ity.View();
+    (view as any)._setElement(document.getElementById('v'));
+    assert.strictEqual(view.el[0].id, 'v');
+    const spans = view.select('span', document.getElementById('v'));
+    assert.equal(spans.length, 1);
+    const spansDoc = view.select('span', document);
+    assert.equal(spansDoc.length, 1);
     cleanup();
   });
 
@@ -129,6 +154,20 @@ describe('View functionality', function () {
     const inp = document.getElementById('i');
     inp.dispatchEvent(new window.Event('focus'));
     assert(focused);
+    cleanup();
+  });
+
+  it('delegated events stop at root when no match', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="v"><div class="c"><button id="b"></button></div></div>');
+    let clicked = false;
+    const view = new window.Ity.View({
+      el: '#v',
+      events: { '.nomatch': { click: 'onClick' } },
+      onClick: function () { clicked = true; }
+    });
+    const btn = document.getElementById('b');
+    btn.dispatchEvent(new window.Event('click', { bubbles: true }));
+    assert.strictEqual(clicked, false);
     cleanup();
   });
 });

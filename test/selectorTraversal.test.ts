@@ -27,6 +27,14 @@ describe('SelectorObject traversal', function () {
     cleanup();
   });
 
+  it('first and last return empty selector when no nodes', function () {
+    const cleanup = setupDOM();
+    const selector = new window.Ity.SelectorObject();
+    assert.strictEqual(selector.first().length, 0);
+    assert.strictEqual(selector.last().length, 0);
+    cleanup();
+  });
+
   it('parent and children work correctly', function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="p"><span></span><span class="x"></span></div>');
     const span = document.querySelector('span');
