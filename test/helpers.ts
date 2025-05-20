@@ -11,17 +11,34 @@ try {
 }
 
 export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') {
-  const dom = new JSDOM(html);
-  const prevWindow = global.window;
-  const prevDocument = global.document;
-  const prevNodeList = global.NodeList;
-  const prevHTMLElement = global.HTMLElement;
-  const prevHTMLDocument = global.HTMLDocument;
-  global.window = dom.window;
-  global.document = dom.window.document;
-  global.NodeList = dom.window.NodeList;
-  global.HTMLElement = dom.window.HTMLElement;
-  global.HTMLDocument = dom.window.HTMLDocument;
+  const usingJest = !!process.env.JEST_WORKER_ID;
+  let dom: any;
+  let prevWindow: any;
+  let prevDocument: any;
+  let prevNodeList: any;
+  let prevHTMLElement: any;
+  let prevHTMLDocument: any;
+
+  if (usingJest && global.document && global.window) {
+    prevWindow = global.window;
+    prevDocument = global.document;
+    // Use the existing jsdom instance provided by Jest and overwrite its HTML
+    global.document.open();
+    global.document.write(html);
+    global.document.close();
+  } else {
+    dom = new JSDOM(html);
+    prevWindow = global.window;
+    prevDocument = global.document;
+    prevNodeList = global.NodeList;
+    prevHTMLElement = global.HTMLElement;
+    prevHTMLDocument = global.HTMLDocument;
+    global.window = dom.window;
+    global.document = dom.window.document;
+    global.NodeList = dom.window.NodeList;
+    global.HTMLElement = dom.window.HTMLElement;
+    global.HTMLDocument = dom.window.HTMLDocument;
+  }
 
   // jsdom starts with readyState 'loading' and never fires DOMContentLoaded
   // synchronously. Force a ready state of complete and dispatch the event so
@@ -32,7 +49,7 @@ export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') 
     global.document.dispatchEvent(evt);
   }
 
-  if (!global.window.addEventListener) {
+  if (!usingJest && !global.window.addEventListener) {
     const listeners: Record<string, Function[]> = {};
     global.window.addEventListener = function (type: string, handler: Function) {
       (listeners[type] ||= []).push(handler);
@@ -48,7 +65,7 @@ export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') 
       arr.slice().forEach((fn) => fn.call(global.window, evt));
     };
   }
-  if (!global.window.history) {
+  if (!usingJest && !global.window.history) {
     global.window.history = {
       stack: ["/"],
       pushState: function (_s: any, _t: any, path: string) {
@@ -60,10 +77,10 @@ export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') 
       },
     } as any;
   }
-  if (!global.window.location) {
+  if (!usingJest && !global.window.location) {
     global.window.location = { pathname: "/", search: "", hash: "" } as any;
   }
-  if (!global.window.HTMLElement.prototype.getAttribute) {
+  if (!usingJest && !global.window.HTMLElement.prototype.getAttribute) {
     global.window.HTMLElement.prototype.getAttribute = function (name: string): any {
       const attrs: any = (this as any).attributes || {};
       if (name in attrs) return attrs[name];
@@ -74,7 +91,7 @@ export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') 
       return null;
     };
   }
-  if (!global.window.HTMLElement.prototype._dispatchPatched) {
+  if (!usingJest && !global.window.HTMLElement.prototype._dispatchPatched) {
     const origDispatch = global.window.HTMLElement.prototype.dispatchEvent;
     
     global.window.HTMLElement.prototype.dispatchEvent = function (event: any): void {
@@ -94,11 +111,17 @@ export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') 
   const ityPath = process.env.ITY_FILE || '../../Ity.js';
   require(ityPath);
   return function cleanup(): void {
-    global.window = prevWindow;
-    global.document = prevDocument;
-    global.NodeList = prevNodeList;
-    global.HTMLElement = prevHTMLElement;
-    global.HTMLDocument = prevHTMLDocument;
+    if (usingJest && global.document && global.window) {
+      global.document.documentElement.innerHTML = '';
+      global.window = prevWindow;
+      global.document = prevDocument;
+    } else {
+      global.window = prevWindow;
+      global.document = prevDocument;
+      global.NodeList = prevNodeList;
+      global.HTMLElement = prevHTMLElement;
+      global.HTMLDocument = prevHTMLDocument;
+    }
     // clear module cache
     delete require.cache[require.resolve(ityPath)];
   };
