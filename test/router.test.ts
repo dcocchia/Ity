@@ -67,4 +67,14 @@ describe('Router', function () {
     assert.deepStrictEqual(params, { id: '7', foo: 'bar', baz: 'qux' });
     cleanup();
   });
+
+  it('parses query and hash without path params', function () {
+    const cleanup = setupDOM();
+    const router = new window.Ity.Router();
+    let params: any;
+    router.addRoute('/test', p => { params = p; });
+    router.navigate('/test?x=1#y=2');
+    assert.deepStrictEqual(params, { x: '1', y: '2' });
+    cleanup();
+  });
 });

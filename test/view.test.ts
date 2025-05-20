@@ -170,4 +170,13 @@ describe('View functionality', function () {
     assert.strictEqual(clicked, false);
     cleanup();
   });
+
+  it('remove unregisters from application', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="v"></div>');
+    const app = new window.Ity.Application();
+    const view = new window.Ity.View({ el: '#v', app });
+    view.remove();
+    assert.strictEqual(app.getView(view.id), undefined);
+    cleanup();
+  });
 });

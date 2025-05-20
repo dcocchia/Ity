@@ -27,4 +27,11 @@ describe('Application', function () {
     assert(triggered);
     cleanup();
   });
+
+  it('returns undefined for missing view', function () {
+    const cleanup = setupDOM();
+    const app = new window.Ity.Application();
+    assert.strictEqual(app.getView('missing'), undefined);
+    cleanup();
+  });
 });
