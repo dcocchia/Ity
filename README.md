@@ -177,7 +177,7 @@ Compile the source files and run the test suite with:
 npm test
 ```
 This command uses a pretest hook to build the project and then runs the
-Mini Mocha test runner. A coverage report can also be generated with:
+Jest test runner. A coverage report can also be generated with:
 ```bash
 npm run coverage
 ```

@@ -4,11 +4,13 @@ declare var require: any;
 declare const global: any;
 
 let JSDOM: any;
-try {
-  ({ JSDOM } = require('jsdom'));
-} catch (e) {
-  ({ JSDOM } = require('../../simple-dom'));
+if (!global.TextEncoder) {
+  global.TextEncoder = require('util').TextEncoder;
 }
+if (!global.TextDecoder) {
+  global.TextDecoder = require('util').TextDecoder;
+}
+({ JSDOM } = require('jsdom'));
 
 export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') {
   const usingJest = !!process.env.JEST_WORKER_ID;
