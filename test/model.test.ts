@@ -109,4 +109,43 @@ describe('Model basics', function () {
     assert.equal(count, 1);
     cleanup();
   });
+
+  it('off with no arguments clears all listeners', function () {
+    const cleanup = setupDOM();
+    const model = new window.Ity.Model();
+    let called = false;
+    model.on('foo', () => called = true);
+    model.on('bar', () => called = true);
+    model.off();
+    model.trigger('foo');
+    model.trigger('bar');
+    assert.strictEqual(called, false);
+    cleanup();
+  });
+
+  it('_ajax error paths invoke error callback', function () {
+    const cleanup = setupDOM();
+    const originalXHR = global.XMLHttpRequest;
+    let status: number | undefined = undefined;
+    function FakeXHRFailStatus() {
+      this.open = () => {};
+      this.send = () => { this.status = 500; this.onload(); };
+    }
+    global.XMLHttpRequest = function () { return new (FakeXHRFailStatus as any)(); };
+    const model = new window.Ity.Model({ url: '/foo' });
+    model.sync({ error(s) { status = s; } });
+    assert.strictEqual(status, 500);
+
+    function FakeXHRError() {
+      this.open = () => {};
+      this.send = () => { this.onerror(); };
+    }
+    global.XMLHttpRequest = function () { return new (FakeXHRError as any)(); };
+    status = undefined;
+    model.sync({ error(s) { status = s ?? 0; } });
+    assert.strictEqual(status, 0);
+
+    global.XMLHttpRequest = originalXHR;
+    cleanup();
+  });
 });
