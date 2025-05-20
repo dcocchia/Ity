@@ -109,4 +109,36 @@ describe('Collection', function () {
     global.XMLHttpRequest = originalXHR;
     cleanup();
   });
+
+  it('find returns undefined when no models match', function () {
+    const cleanup = setupDOM();
+    const c = new window.Ity.Collection();
+    const found = c.find(() => false);
+    assert.strictEqual(found, undefined);
+    cleanup();
+  });
+
+  it('_ajax error path invokes error callback', function () {
+    const cleanup = setupDOM();
+    const originalXHR = global.XMLHttpRequest;
+    let status: number | undefined = undefined;
+    function FakeXHRFailStatus() {
+      this.open = () => {};
+      this.send = () => { this.status = 404; this.onload(); };
+    }
+    const c = new window.Ity.Collection([], window.Ity.Model);
+    c.url = '/foo';
+    global.XMLHttpRequest = function () { return new (FakeXHRFailStatus as any)(); };
+    c.fetch({ error(s) { status = s; } });
+    assert.strictEqual(status, 404);
+
+    function FakeXHRError() { this.open = () => {}; this.send = () => { this.onerror(); }; }
+    global.XMLHttpRequest = function () { return new (FakeXHRError as any)(); };
+    status = undefined;
+    c.fetch({ error(s) { status = s ?? 0; } });
+    assert.strictEqual(status, 0);
+
+    global.XMLHttpRequest = originalXHR;
+    cleanup();
+  });
 });

@@ -91,6 +91,33 @@ describe('View functionality', function () {
     cleanup();
   });
 
+  it('off with no args clears all listeners', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="v"></div>');
+    const view = new window.Ity.View({ el: '#v' });
+    let called = false;
+    view.on('foo', () => called = true);
+    view.on('bar', () => called = true);
+    view.off();
+    view.trigger('foo');
+    view.trigger('bar');
+    assert.strictEqual(called, false);
+    cleanup();
+  });
+
+  it('_setElement throws on invalid selector', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="v"></div>');
+    const view = new window.Ity.View();
+    assert.throws(() => (view as any)._setElement(5 as any));
+    cleanup();
+  });
+
+  it('select throws when given invalid context', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="v"><span></span></div>');
+    const view = new window.Ity.View({ el: '#v' });
+    assert.throws(() => view.select('span', {} as any));
+    cleanup();
+  });
+
   it('delegates focus events using capture', function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="v"><input id="i"></div>');
     let focused = false;
