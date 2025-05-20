@@ -141,4 +141,16 @@ describe('Collection', function () {
     global.XMLHttpRequest = originalXHR;
     cleanup();
   });
+
+  it('remove handles model objects and missing ids', function () {
+    const cleanup = setupDOM();
+    const c = new window.Ity.Collection();
+    const m1 = new window.Ity.Model();
+    c.add(m1);
+    c.remove(m1);
+    assert.strictEqual(c.length, 0);
+    c.remove('nope');
+    assert.strictEqual(c.length, 0);
+    cleanup();
+  });
 });

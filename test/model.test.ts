@@ -161,4 +161,33 @@ describe('Model basics', function () {
     global.XMLHttpRequest = originalXHR;
     cleanup();
   });
+
+  it('get returns undefined when data missing', function () {
+    const cleanup = setupDOM();
+    const m = new window.Ity.Model();
+    (m as any).data = undefined;
+    assert.strictEqual(m.get('foo'), undefined);
+    cleanup();
+  });
+
+  it('off with mismatched context does not remove listener', function () {
+    const cleanup = setupDOM();
+    const m = new window.Ity.Model();
+    let count = 0;
+    const ctx1 = {};
+    const ctx2 = {};
+    function cb() { count++; }
+    m.on('e', cb, ctx1);
+    m.off('e', cb, ctx2);
+    m.trigger('e');
+    assert.equal(count, 1);
+    cleanup();
+  });
+
+  it('off on missing event is a no-op', function () {
+    const cleanup = setupDOM();
+    const m = new window.Ity.Model();
+    m.off('missing', () => {});
+    cleanup();
+  });
 });

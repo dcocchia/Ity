@@ -53,4 +53,25 @@ describe('SelectorObject HTML insertion', function () {
     assert(children[1].classList.contains('two'));
     cleanup();
   });
+
+  it('handles HTMLElement content', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="target"></div>');
+    const target = new window.Ity.SelectorObject([
+      document.getElementById('target')
+    ]);
+    const span = document.createElement('span');
+    target.append(span);
+    assert.strictEqual(
+      target.first()[0].lastElementChild?.tagName,
+      'SPAN'
+    );
+    const div = document.createElement('div');
+    target.html('<p></p>');
+    target.append(div);
+    assert.strictEqual(
+      target.first()[0].lastElementChild?.tagName,
+      'DIV'
+    );
+    cleanup();
+  });
 });
