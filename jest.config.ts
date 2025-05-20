@@ -52,8 +52,7 @@ const config: Config = {
   //   "clover"
   // ],
 
-  // An object that configures minimum threshold enforcement for coverage results
-  // coverageThreshold: undefined,
+  // Minimum coverage percentages. Tests may fail if these values are not met.
 
   // A path to a custom dependency extractor
   // dependencyExtractor: undefined,
