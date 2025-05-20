@@ -18,6 +18,15 @@ describe('Model basics', function () {
     cleanup();
   });
 
+  it('replaces all attributes when an object is passed', function () {
+    const cleanup = setupDOM();
+    const model = new window.Ity.Model();
+    model.set('first', 'val');
+    model.set({second: 2});
+    assert.deepEqual(model.get(), {second: 2});
+    cleanup();
+  });
+
   it('unset and clear', function () {
     const cleanup = setupDOM();
     const model = new window.Ity.Model();
