@@ -16,6 +16,7 @@
     "test": "jest",
     "pretest": "tsc -p tsconfig.json && cp build/Ity.js Ity.js",
     "coverage": "jest --coverage",
+    "precoverage": "tsc -p tsconfig.json && cp build/Ity.js Ity.js",
     "build": "rollup -c",
     "test:dist": "ITY_FILE=dist/ity.min.js npm test"
   },

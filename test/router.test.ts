@@ -35,6 +35,7 @@ describe('Router', function () {
     router.navigate('/bar');
     assert.equal(count, 1);
     router.stop();
+    router.stop();
     window.history.pushState(null, '', '/bar');
     window.dispatchEvent(new window.Event('popstate'));
     assert.equal(count, 1);

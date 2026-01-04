@@ -655,15 +655,19 @@ const Ity: any = (function (window: any) {
   Ity.Collection = Collection;
   Ity.Router = Router;
 
+  const hasDOMWindow = !!(window && (window as any).document);
+
+  /* istanbul ignore else */
   if (typeof define === 'function' && (define as any).amd) {
     (define as any)(function () {
-      if (typeof window !== 'undefined') (window as any).Ity = Ity;
+      /* istanbul ignore else */
+      if (hasDOMWindow) (window as any).Ity = Ity;
       return Ity;
     });
   } else if (typeof module === 'object' && typeof module.exports !== 'undefined') {
     module.exports = Ity;
   }
-  if (typeof window !== 'undefined') {
+  if (hasDOMWindow) {
     (window as any).Ity = Ity;
   }
   return Ity;

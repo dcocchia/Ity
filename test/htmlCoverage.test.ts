@@ -44,7 +44,6 @@ describe('Additional coverage for html and onDOMReady', function () {
     ity.onDOMReady(() => ready = true);
     dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
     assert(ready);
-    delete require.cache[require.resolve('../../Ity.js')];
     delete global.window;
     delete global.document;
     delete global.NodeList;

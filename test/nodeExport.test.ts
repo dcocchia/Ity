@@ -13,6 +13,5 @@ describe('CommonJS export', function () {
     const ity = require('../../Ity.js');
     assert.strictEqual(ity, global.window.Ity);
     cleanup();
-    delete require.cache[require.resolve('../../Ity.js')];
   });
 });
