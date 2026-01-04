@@ -124,7 +124,9 @@ export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') 
       global.HTMLElement = prevHTMLElement;
       global.HTMLDocument = prevHTMLDocument;
     }
-    // clear module cache
-    delete require.cache[require.resolve(ityPath)];
+    if (!usingJest) {
+      // clear module cache
+      delete require.cache[require.resolve(ityPath)];
+    }
   };
 }

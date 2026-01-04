@@ -153,4 +153,24 @@ describe('Collection', function () {
     assert.strictEqual(c.length, 0);
     cleanup();
   });
+
+  it('ignores non-models and filters mixed results', function () {
+    const cleanup = setupDOM();
+    const c = new window.Ity.Collection();
+    c.add({} as any);
+    assert.strictEqual(c.length, 0);
+    const m1 = new window.Ity.Model();
+    const m2 = new window.Ity.Model();
+    m1.set('score', 1);
+    m2.set('score', 2);
+    c.add(m1);
+    const other = new window.Ity.Model();
+    c.remove(other);
+    assert.strictEqual(c.length, 1);
+    c.add(m2);
+    const filtered = c.filter((m) => m.get('score') === 2);
+    assert.strictEqual(filtered.length, 1);
+    assert.strictEqual(filtered[0], m2);
+    cleanup();
+  });
 });
