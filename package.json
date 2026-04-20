@@ -4,11 +4,19 @@
   "description": "A tiny dependency-free reactive app kernel with MVC compatibility",
   "main": "dist/ity.cjs.js",
   "module": "dist/ity.esm.mjs",
+  "browser": "dist/ity.js",
   "types": "dist/ity.d.ts",
+  "unpkg": "dist/ity.min.js",
+  "jsdelivr": "dist/ity.min.js",
   "exports": {
     "import": "./dist/ity.esm.mjs",
     "require": "./dist/ity.cjs.js"
   },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=20"
   },
