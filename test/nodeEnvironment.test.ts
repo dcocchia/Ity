@@ -16,7 +16,15 @@ describe('Node environment bootstrap', function () {
     const ity = require('../../Ity.js');
     assert.strictEqual(typeof global.window, 'undefined');
     assert.ok(ity);
-    assert.strictEqual(ity.version, '1.0.0');
+    assert.strictEqual(ity.version, '2.0.0');
+    const router = new ity.Router({ autoStart: false });
+    (router as any).handleLinkClick({
+      target: {
+        closest() {
+          return { target: '', hasAttribute: () => false, href: '/nowhere' };
+        }
+      }
+    });
     if (hadWindow) {
       global.window = prevWindow;
     }

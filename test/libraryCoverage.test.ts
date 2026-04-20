@@ -18,6 +18,8 @@ describe('Library coverage expansion', function () {
 
     count.subscribe((value: number, previous: number) => signalEvents.push([value, previous]));
     computedValue.subscribe((value: number, previous: number) => computedEvents.push([value, previous]));
+    assert.strictEqual(computedValue.get(), 10);
+    assert.strictEqual(computedValue.peek(), 10);
 
     const dispose = window.Ity.effect((onCleanup: any) => {
       onCleanup(() => {
@@ -592,6 +594,27 @@ describe('Library coverage expansion', function () {
     const doubleDispose = window.Ity.effect(() => {});
     doubleDispose();
     doubleDispose();
+    const scheduled = window.Ity.signal(0);
+    const disposeScheduled = window.Ity.effect(() => {
+      scheduled();
+    });
+    window.Ity.batch(() => {
+      scheduled.set(1);
+      disposeScheduled();
+    });
+    const shared = window.Ity.signal(0);
+    let disposeQueued: any;
+    const disposeFirst = window.Ity.effect(() => {
+      shared();
+      if (shared.peek() === 1 && disposeQueued) disposeQueued();
+    });
+    disposeQueued = window.Ity.effect(() => {
+      shared();
+    });
+    window.Ity.batch(() => {
+      shared.set(1);
+    });
+    disposeFirst();
 
     const state = window.Ity.store({ a: 1 });
     state.$patch(() => {});
