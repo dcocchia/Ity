@@ -1,4 +1,4 @@
-// Ity.ts 2.0.0
+// Ity.ts 2.1.0
 // (c) 2026 Dominic Cocchiarella
 // Tiny dependency-free reactive app kernel with V1 MVC compatibility.
 declare var define: any;
@@ -68,6 +68,16 @@ interface UnsafeHTML {
   readonly value: string;
 }
 
+type HTMLSanitizer = (value: string) => string;
+
+interface UnsafeHTMLOptions {
+  sanitize?: HTMLSanitizer;
+}
+
+interface ItyConfig {
+  sanitizeHTML?: HTMLSanitizer | null;
+}
+
 interface RenderOptions {
   reactive?: boolean;
   transition?: boolean;
@@ -83,10 +93,68 @@ interface StoreApi<T extends Record<StoreKey, any>> {
 
 type Store<T extends Record<StoreKey, any>> = T & StoreApi<T>;
 
+type AsyncStatus = "idle" | "loading" | "success" | "error";
+
+interface ResourceContext<T> {
+  signal: AbortSignal;
+  previous: T | undefined;
+  refreshId: number;
+}
+
+interface ResourceOptions<T, E = unknown> {
+  initialValue?: T;
+  immediate?: boolean;
+  keepPrevious?: boolean;
+  onSuccess?: (value: T) => void;
+  onError?: (error: E) => void;
+}
+
+interface Resource<T, E = unknown> {
+  readonly data: Signal<T | undefined>;
+  readonly error: Signal<E | null>;
+  readonly loading: ReadonlySignal<boolean>;
+  readonly status: ReadonlySignal<AsyncStatus>;
+  readonly promise: Promise<T | undefined> | null;
+  refresh(): Promise<T | undefined>;
+  mutate(value: T | undefined): void;
+  abort(reason?: unknown): void;
+}
+
+interface ActionOptions<TResult, E = unknown> {
+  onSuccess?: (value: TResult) => void;
+  onError?: (error: E) => void;
+}
+
+interface Action<TArgs extends unknown[], TResult, E = unknown> {
+  (...args: TArgs): Promise<TResult>;
+  submit(...args: TArgs): Promise<TResult>;
+  readonly data: Signal<TResult | undefined>;
+  readonly error: Signal<E | null>;
+  readonly pending: ReadonlySignal<boolean>;
+  readonly pendingCount: ReadonlySignal<number>;
+  readonly status: ReadonlySignal<AsyncStatus>;
+  reset(): void;
+}
+
+interface FormController<TResult, E = unknown> {
+  readonly action: Action<[FormData, Event], TResult, E>;
+  readonly data: Signal<TResult | undefined>;
+  readonly error: Signal<E | null>;
+  readonly pending: ReadonlySignal<boolean>;
+  readonly status: ReadonlySignal<AsyncStatus>;
+  onSubmit(event: Event): Promise<TResult>;
+  reset(): void;
+}
+
+interface FormOptions<TResult, E = unknown> extends ActionOptions<TResult, E> {
+  resetOnSuccess?: boolean;
+}
+
 const defaultEquals = Object.is;
 let activeObserver: ReactiveObserver | null = null;
 let batchDepth = 0;
 const pendingEffects = new Set<ReactiveEffect>();
+let configuredSanitizeHTML: HTMLSanitizer | undefined;
 
 function getWindow(): (Window & typeof globalThis) | undefined {
   return typeof window !== "undefined" ? window : undefined;
@@ -338,19 +406,35 @@ function resolveSignal<T>(value: MaybeSignal<T>): T {
   return isSignal<T>(value) ? value() : value;
 }
 
+function configure(options: ItyConfig = {}): void {
+  configuredSanitizeHTML = options.sanitizeHTML || undefined;
+}
+
 function store<T extends Record<StoreKey, any>>(initialValue: T): Store<T> {
   const keys = new Set<StoreKey>(Reflect.ownKeys(initialValue));
   const signals = new Map<StoreKey, Signal<any>>();
+  const structure = signal(0);
 
   const ensureSignal = (key: StoreKey): Signal<any> => {
     if (!signals.has(key)) {
       signals.set(key, signal((initialValue as any)[key]));
-      keys.add(key);
     }
     return signals.get(key)!;
   };
 
+  const bumpStructure = (): void => {
+    structure.update((version) => version + 1);
+  };
+
+  const setKey = (key: StoreKey, value: any): void => {
+    const hadKey = keys.has(key);
+    if (!hadKey) keys.add(key);
+    ensureSignal(key).set(value);
+    if (!hadKey) bumpStructure();
+  };
+
   const snapshot = (): T => {
+    structure();
     const out: any = {};
     for (const key of keys) {
       out[key] = ensureSignal(key)();
@@ -365,7 +449,7 @@ function store<T extends Record<StoreKey, any>>(initialValue: T): Store<T> {
       if (!next) return;
       batch(() => {
         for (const key of Reflect.ownKeys(next)) {
-          ensureSignal(key).set((next as any)[key]);
+          setKey(key, (next as any)[key]);
         }
       });
     },
@@ -390,27 +474,249 @@ function store<T extends Record<StoreKey, any>>(initialValue: T): Store<T> {
       return ensureSignal(key)();
     },
     set(_target, key, value) {
-      ensureSignal(key).set(value);
+      batch(() => {
+        setKey(key, value);
+      });
       return true;
     },
     deleteProperty(_target, key) {
       if (!keys.has(key)) return true;
       keys.delete(key);
-      signals.delete(key);
+      batch(() => {
+        ensureSignal(key).set(undefined);
+        bumpStructure();
+      });
       return true;
     },
     ownKeys(target) {
+      structure();
       return Array.from(new Set([...Reflect.ownKeys(target), ...keys]));
     },
     getOwnPropertyDescriptor(target, key) {
-      if (key in target) return Reflect.getOwnPropertyDescriptor(target, key);
+      structure();
+      if (Object.prototype.hasOwnProperty.call(target, key)) {
+        return { ...Reflect.getOwnPropertyDescriptor(target, key)!, enumerable: false };
+      }
       if (!keys.has(key)) return undefined;
       return { enumerable: true, configurable: true };
     },
     has(target, key) {
+      structure();
       return key in target || keys.has(key);
     }
   });
+}
+
+function resource<T, E = unknown>(
+  loader: (context: ResourceContext<T>) => Promise<T> | T,
+  options: ResourceOptions<T, E> = {}
+): Resource<T, E> {
+  const data = signal<T | undefined>(options.initialValue);
+  const error = signal<E | null>(null);
+  const pending = signal(false);
+  const statusValue = signal<AsyncStatus>(options.initialValue === undefined ? "idle" : "success");
+  const loading = computed(() => pending());
+  const status = computed(() => statusValue());
+  const keepPrevious = options.keepPrevious !== false;
+  let controller: AbortController | null = null;
+  let refreshId = 0;
+  let currentPromise: Promise<T | undefined> | null = null;
+
+  const api: Resource<T, E> = {
+    data,
+    error,
+    loading,
+    status,
+    get promise() {
+      return currentPromise;
+    },
+    refresh() {
+      refreshId += 1;
+      const id = refreshId;
+      if (controller) controller.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      const previous = data.peek();
+      pending.set(true);
+      statusValue.set("loading");
+      error.set(null);
+      if (!keepPrevious) data.set(undefined);
+
+      currentPromise = Promise.resolve()
+        .then(() => loader({ signal, previous, refreshId: id }))
+        .then((value) => {
+          if (id !== refreshId || signal.aborted) return data.peek();
+          data.set(value);
+          error.set(null);
+          statusValue.set("success");
+          options.onSuccess?.(value);
+          return value;
+        })
+        .catch((err) => {
+          if (id !== refreshId) return data.peek();
+          error.set(err as E);
+          statusValue.set("error");
+          options.onError?.(err as E);
+          return data.peek();
+        })
+        .finally(() => {
+          if (id === refreshId) {
+            pending.set(false);
+            controller = null;
+          }
+        });
+
+      return currentPromise;
+    },
+    mutate(value) {
+      refreshId += 1;
+      if (controller) controller.abort();
+      controller = null;
+      currentPromise = null;
+      data.set(value);
+      error.set(null);
+      pending.set(false);
+      statusValue.set(value === undefined ? "idle" : "success");
+    },
+    abort(reason?: unknown) {
+      if (!controller) return;
+      refreshId += 1;
+      controller.abort(reason);
+      controller = null;
+      currentPromise = null;
+      pending.set(false);
+      statusValue.set(data.peek() === undefined ? "idle" : "success");
+    }
+  };
+
+  if (options.immediate !== false) {
+    api.refresh();
+  }
+
+  return api;
+}
+
+function action<TArgs extends unknown[], TResult, E = unknown>(
+  handler: (...args: TArgs) => Promise<TResult> | TResult,
+  options: ActionOptions<TResult, E> = {}
+): Action<TArgs, TResult, E> {
+  const data = signal<TResult | undefined>(undefined);
+  const error = signal<E | null>(null);
+  const count = signal(0);
+  const statusValue = signal<AsyncStatus>("idle");
+  const pending = computed(() => count() > 0);
+  const pendingCount = computed(() => count());
+  const status = computed(() => statusValue());
+  let generation = 0;
+
+  const submit = (...args: TArgs): Promise<TResult> => {
+    const runGeneration = generation;
+    count.update((value) => value + 1);
+    statusValue.set("loading");
+    error.set(null);
+
+    return Promise.resolve()
+      .then(() => handler(...args))
+      .then((value) => {
+        if (runGeneration === generation) {
+          data.set(value);
+          error.set(null);
+          options.onSuccess?.(value);
+          if (count.peek() <= 1) statusValue.set("success");
+        }
+        return value;
+      })
+      .catch((err) => {
+        if (runGeneration === generation) {
+          error.set(err as E);
+          options.onError?.(err as E);
+          if (count.peek() <= 1) statusValue.set("error");
+        }
+        throw err;
+      })
+      .finally(() => {
+        if (runGeneration !== generation) return;
+        count.update((value) => Math.max(0, value - 1));
+        if (count.peek() > 0) statusValue.set("loading");
+      });
+  };
+
+  const callable = ((...args: TArgs) => submit(...args)) as Action<TArgs, TResult, E>;
+  const mutableCallable = callable as Action<TArgs, TResult, E> & {
+    submit: (...args: TArgs) => Promise<TResult>;
+    data: Signal<TResult | undefined>;
+    error: Signal<E | null>;
+    pending: ReadonlySignal<boolean>;
+    pendingCount: ReadonlySignal<number>;
+    status: ReadonlySignal<AsyncStatus>;
+  };
+  mutableCallable.submit = submit;
+  mutableCallable.data = data;
+  mutableCallable.error = error;
+  mutableCallable.pending = pending;
+  mutableCallable.pendingCount = pendingCount;
+  mutableCallable.status = status;
+  callable.reset = () => {
+    generation += 1;
+    data.set(undefined);
+    error.set(null);
+    count.set(0);
+    statusValue.set("idle");
+  };
+  return callable;
+}
+
+function form<TResult, E = unknown>(
+  handler: (data: FormData, event: Event) => Promise<TResult> | TResult,
+  options: FormOptions<TResult, E> = {}
+): FormController<TResult, E> {
+  const submitAction = action<[FormData, Event], TResult, E>(handler, options);
+
+  const findForm = (event: Event): HTMLFormElement => {
+    const target = (event.currentTarget || event.target) as Element | null;
+    const getFormElementCtor = (node: Element | null): typeof HTMLFormElement | undefined => {
+      const ownerWindow = node?.ownerDocument?.defaultView as (Window & typeof globalThis) | null | undefined;
+      return ownerWindow?.HTMLFormElement
+        || getWindow()?.HTMLFormElement
+        || (typeof HTMLFormElement !== "undefined" ? HTMLFormElement : undefined);
+    };
+    const isFormElement = (node: Element | null | undefined): node is HTMLFormElement => {
+      const FormElement = node ? getFormElementCtor(node) : getFormElementCtor(target);
+      return Boolean(node && FormElement && node instanceof FormElement);
+    };
+    if (!getFormElementCtor(target)) throw new Error("Ity.form requires HTMLFormElement support");
+    if (isFormElement(target)) return target;
+    const closest = target?.closest?.("form");
+    if (isFormElement(closest)) return closest;
+    throw new Error("Ity.form onSubmit requires a form event target");
+  };
+
+  const createFormData = (formElement: HTMLFormElement): FormData => {
+    const ownerWindow = formElement.ownerDocument?.defaultView as (Window & typeof globalThis) | null | undefined;
+    const FormDataCtor = ownerWindow?.FormData
+      || getWindow()?.FormData
+      || (typeof FormData !== "undefined" ? FormData : undefined);
+    if (!FormDataCtor) throw new Error("Ity.form requires FormData support");
+    return new FormDataCtor(formElement);
+  };
+
+  return {
+    action: submitAction,
+    data: submitAction.data,
+    error: submitAction.error,
+    pending: submitAction.pending,
+    status: submitAction.status,
+    async onSubmit(event: Event): Promise<TResult> {
+      event.preventDefault();
+      const formElement = findForm(event);
+      const result = await submitAction(createFormData(formElement), event);
+      if (options.resetOnSuccess) formElement.reset();
+      return result;
+    },
+    reset() {
+      submitAction.reset();
+    }
+  };
 }
 
 function html(strings: TemplateStringsArray | readonly string[], ...values: unknown[]): TemplateResult {
@@ -421,10 +727,11 @@ function html(strings: TemplateStringsArray | readonly string[], ...values: unkn
   };
 }
 
-function unsafeHTML(value: string): UnsafeHTML {
+function unsafeHTML(value: string, options: UnsafeHTMLOptions = {}): UnsafeHTML {
+  const sanitizer = options.sanitize || configuredSanitizeHTML;
   return {
     isUnsafeHTML: true,
-    value: String(value)
+    value: sanitizer ? sanitizer(String(value)) : String(value)
   };
 }
 
@@ -772,11 +1079,17 @@ function component(
     private attrSignals = new Map<string, Signal<string | null>>();
     private connectedCallbacks: Cleanup[] = [];
     private disconnectedCallbacks: Cleanup[] = [];
-    private effectHandles: EffectHandle[] = [];
+    private effectRecords: Array<{
+      callback: (onCleanup: (cleanup: Cleanup) => void) => void;
+      handle?: EffectHandle;
+      disposed: boolean;
+    }> = [];
     private renderCleanup?: Cleanup;
     private mount?: HTMLElement | ShadowRoot;
     private renderTarget?: HTMLElement | ShadowRoot;
+    private renderOutput?: ComponentRender;
     private initialized = false;
+    private connected = false;
 
     connectedCallback(): void {
       this.ensureMount();
@@ -785,18 +1098,25 @@ function component(
         const ctx = this.createContext();
         const output = definition.setup?.(ctx);
         if (output !== undefined) {
-          this.renderCleanup = render(output as ComponentRender, this.renderTarget!, { transition: false });
+          this.renderOutput = output as ComponentRender;
         }
       }
+      this.connected = true;
+      this.startRender();
+      this.startEffects();
       for (const callback of this.connectedCallbacks) callback();
     }
 
     disconnectedCallback(): void {
+      this.connected = false;
       if (this.renderCleanup) {
         this.renderCleanup();
         this.renderCleanup = undefined;
       }
-      for (const handle of this.effectHandles.splice(0)) handle.dispose();
+      for (const record of this.effectRecords) {
+        record.handle?.dispose();
+        record.handle = undefined;
+      }
       for (const callback of this.disconnectedCallbacks) callback();
     }
 
@@ -830,6 +1150,19 @@ function component(
       }
     }
 
+    private startRender(): void {
+      if (this.renderCleanup || this.renderOutput === undefined) return;
+      this.renderCleanup = render(this.renderOutput, this.renderTarget!, { transition: false });
+    }
+
+    private startEffects(): void {
+      for (const record of this.effectRecords) {
+        if (!record.disposed && !record.handle) {
+          record.handle = effect(record.callback);
+        }
+      }
+    }
+
     private ensureAttrSignal(name: string): Signal<string | null> {
       if (!this.attrSignals.has(name)) {
         this.attrSignals.set(name, signal(this.getAttribute(name)));
@@ -849,9 +1182,16 @@ function component(
           detail
         })),
         effect: (callback) => {
-          const handle = effect(callback);
-          this.effectHandles.push(handle);
-          return handle;
+          const record = { callback, disposed: false, handle: undefined as EffectHandle | undefined };
+          this.effectRecords.push(record);
+          if (this.connected) record.handle = effect(callback);
+          const dispose = (() => {
+            record.disposed = true;
+            record.handle?.dispose();
+            record.handle = undefined;
+          }) as EffectHandle;
+          dispose.dispose = dispose;
+          return dispose;
         },
         onConnected: (callback) => {
           this.connectedCallbacks.push(callback);
@@ -1464,7 +1804,7 @@ interface RouteContext {
   hash: Record<string, string>;
 }
 
-type RouteHandler = (params: Record<string, string>, context: RouteContext) => void;
+type RouteHandler = (params: Record<string, string>, context: RouteContext) => void | Cleanup;
 
 interface RouteRecord {
   pattern: string;
@@ -1486,6 +1826,8 @@ class Router {
   private readonly listener = () => this.check();
   private readonly clickListener = (event: Event) => this.handleLinkClick(event);
   private readonly navigationListener = (event: any) => this.handleNavigationEvent(event);
+  private routeCleanup?: Cleanup;
+  private activeRoute?: RouteRecord;
   public readonly current: Signal<RouteContext | null> = signal<RouteContext | null>(null);
   public notFound?: RouteHandler;
   public base: string;
@@ -1510,6 +1852,11 @@ class Router {
   }
 
   removeRoute(pattern: string): this {
+    if (this.activeRoute?.pattern === pattern) {
+      this.disposeRoute();
+      this.activeRoute = undefined;
+      this.current.set(null);
+    }
     this.routes = this.routes.filter((route) => route.pattern !== pattern);
     return this;
   }
@@ -1519,7 +1866,7 @@ class Router {
     if (!win) return;
     const update = () => {
       const method = options.replace ? "replaceState" : "pushState";
-      win.history[method](null, "", path);
+      win.history[method](null, "", withBasePath(path, this.base));
       this.check();
     };
     withViewTransition(update, options.transition ?? this.transition);
@@ -1542,42 +1889,59 @@ class Router {
   stop(): void {
     const win = getWindow();
     const doc = getDocument();
-    if (!win || !this.started) return;
-    win.removeEventListener("popstate", this.listener);
-    doc?.removeEventListener("click", this.clickListener);
-    (win as any).navigation?.removeEventListener?.("navigate", this.navigationListener);
+    if (win && this.started) {
+      win.removeEventListener("popstate", this.listener);
+      doc?.removeEventListener("click", this.clickListener);
+      (win as any).navigation?.removeEventListener?.("navigate", this.navigationListener);
+    }
     this.started = false;
+    this.disposeRoute();
   }
 
   check(): RouteContext | null {
     const win = getWindow();
     if (!win) return null;
     const url = new URL(win.location.href);
+    const routePath = stripBasePath(url.pathname, this.base);
+    if (routePath === null) {
+      this.disposeRoute();
+      this.activeRoute = undefined;
+      this.current.set(null);
+      return null;
+    }
+    const routeUrl = new URL(url.href);
+    routeUrl.pathname = routePath || "/";
     for (const route of this.routes) {
-      const routeParams = route.exec(url);
+      const routeParams = route.exec(routeUrl);
       if (!routeParams) continue;
       const query = searchParamsToObject(url.search);
       const hash = searchParamsToObject(url.hash);
       const params = { ...routeParams, ...query, ...hash };
       const context: RouteContext = {
-        path: url.pathname,
+        path: routePath || "/",
         url,
         params,
         query,
         hash
       };
+      this.disposeRoute();
+      this.activeRoute = route;
       this.current.set(context);
-      route.handler(params, context);
+      const cleanup = route.handler(params, context);
+      if (typeof cleanup === "function") this.routeCleanup = cleanup;
       return context;
     }
+    this.disposeRoute();
+    this.activeRoute = undefined;
     this.current.set(null);
-    this.notFound?.({}, {
-      path: url.pathname,
+    const cleanup = this.notFound?.({}, {
+      path: routePath || "/",
       url,
       params: {},
       query: searchParamsToObject(url.search),
       hash: searchParamsToObject(url.hash)
     });
+    if (typeof cleanup === "function") this.routeCleanup = cleanup;
     return null;
   }
 
@@ -1589,6 +1953,7 @@ class Router {
     if (!win) return;
     const url = new URL(anchor.href, win.location.href);
     if (url.origin !== win.location.origin) return;
+    if (stripBasePath(url.pathname, this.base) === null) return;
     event.preventDefault();
     this.navigate(`${url.pathname}${url.search}${url.hash}`);
   }
@@ -1598,11 +1963,19 @@ class Router {
     if (!win || !event?.canIntercept || !event.destination?.url || typeof event.intercept !== "function") return;
     const url = new URL(event.destination.url, win.location.href);
     if (url.origin !== win.location.origin) return;
+    if (stripBasePath(url.pathname, this.base) === null) return;
     event.intercept({
       handler: () => {
         this.check();
       }
     });
+  }
+
+  private disposeRoute(): void {
+    if (!this.routeCleanup) return;
+    const cleanup = this.routeCleanup;
+    this.routeCleanup = undefined;
+    cleanup();
   }
 }
 
@@ -1639,6 +2012,32 @@ function createRouteRecord(pattern: string, handler: RouteHandler): RouteRecord 
       return params;
     }
   };
+}
+
+function normalizeBase(base: string): string {
+  const normalized = normalizePath(base || "/");
+  return normalized === "" ? "" : normalized;
+}
+
+function withBasePath(path: string, base: string): string {
+  const normalizedBase = normalizeBase(base);
+  const parsed = new URL(path || "/", "http://ity.local");
+  let pathname = normalizePath(parsed.pathname) || "/";
+  if (normalizedBase && pathname !== normalizedBase && !pathname.startsWith(`${normalizedBase}/`)) {
+    pathname = `${normalizedBase}${pathname === "/" ? "" : pathname}`;
+  }
+  return `${pathname}${parsed.search}${parsed.hash}`;
+}
+
+function stripBasePath(pathname: string, base: string): string | null {
+  const normalizedBase = normalizeBase(base);
+  const normalizedPath = normalizePath(pathname) || "/";
+  if (!normalizedBase) return normalizedPath;
+  if (normalizedPath === normalizedBase) return "/";
+  if (normalizedPath.startsWith(`${normalizedBase}/`)) {
+    return normalizePath(normalizedPath.slice(normalizedBase.length)) || "/";
+  }
+  return null;
 }
 
 function compilePathPattern(pattern: string): { re: RegExp; keys: string[] } {
@@ -1693,15 +2092,17 @@ const defaultRouter = signal<Router | null>(null);
 function route(pattern: string, handler: RouteHandler): Router {
   let router = defaultRouter.peek();
   if (!router) {
-    router = new Router();
+    router = new Router({ autoStart: false });
     defaultRouter.set(router);
   }
   router.add(pattern, handler);
+  router.start();
   return router;
 }
 
 const Ity = {
-  version: "2.0.0",
+  version: "2.1.0",
+  configure,
   signal,
   computed,
   effect,
@@ -1710,6 +2111,9 @@ const Ity = {
   isSignal,
   resolveSignal,
   store,
+  resource,
+  action,
+  form,
   html,
   unsafeHTML,
   render,
@@ -1752,13 +2156,17 @@ export {
   View,
   batch,
   component,
+  configure,
   computed,
   effect,
+  action,
+  form,
   html,
   isSignal,
   onDOMReady,
   render,
   renderToString,
+  resource,
   resolveSignal,
   route,
   signal,
@@ -1767,14 +2175,26 @@ export {
   untrack
 };
 export type {
+  Action,
+  ActionOptions,
+  AsyncStatus,
   ComponentContext,
   ComponentOptions,
   EffectHandle,
+  FormController,
+  FormOptions,
+  HTMLSanitizer,
+  ItyConfig,
   ReadonlySignal,
   RenderOptions,
+  Resource,
+  ResourceContext,
+  ResourceOptions,
   RouteContext,
+  RouteHandler,
   Signal,
   Store,
-  TemplateResult
+  TemplateResult,
+  UnsafeHTMLOptions
 };
 export default Ity;

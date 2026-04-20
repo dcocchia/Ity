@@ -82,12 +82,86 @@ describe('V2 router', function () {
     assert.equal(wildcard, 'a/b/c');
 
     let helperHit = false;
+    window.history.pushState(null, '', '/helper');
     const defaultRouter = window.Ity.route('/helper', () => {
       helperHit = true;
     });
-    defaultRouter.navigate('/helper');
     assert.equal(helperHit, true);
     defaultRouter.stop();
+    cleanup();
+  });
+
+  it('applies base paths to matching, navigation, links and notFound', function () {
+    const cleanup = setupDOM(`
+      <!DOCTYPE html>
+      <a id="inside" data-ity-link href="/app/users/7?tab=info#panel=main">User</a>
+      <a id="outside" data-ity-link href="/outside">Outside</a>
+    `);
+    const router = new window.Ity.Router({
+      autoStart: false,
+      base: '/app',
+      notFound(_params: any, context: any) {
+        router.missing = context.path;
+      }
+    });
+    let context: any = null;
+
+    router.add('/users/:id', (_params: any, ctx: any) => {
+      context = ctx;
+    });
+    router.start();
+    router.navigate('/users/42?tab=profile');
+    assert.strictEqual(window.location.pathname, '/app/users/42');
+    assert.strictEqual(context.path, '/users/42');
+    assert.strictEqual(context.params.id, '42');
+
+    document.getElementById('inside').dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+    assert.strictEqual(window.location.pathname, '/app/users/7');
+    assert.strictEqual(context.params.panel, 'main');
+
+    const outsideClick = new window.MouseEvent('click', { bubbles: true, cancelable: true });
+    document.getElementById('outside').dispatchEvent(outsideClick);
+    assert.strictEqual(outsideClick.defaultPrevented, false);
+
+    router.navigate('/app');
+    assert.strictEqual(router.missing, '/');
+
+    router.navigate('/app/missing');
+    assert.strictEqual(router.missing, '/missing');
+    window.history.pushState(null, '', '/outside');
+    assert.strictEqual(router.check(), null);
+    router.stop();
+    cleanup();
+  });
+
+  it('runs route cleanup on transitions, route removal and stop', function () {
+    const cleanup = setupDOM();
+    const router = new window.Ity.Router({ autoStart: false });
+    const events: string[] = [];
+
+    router.add('/one', () => {
+      events.push('one');
+      return () => events.push('cleanup-one');
+    });
+    router.add('/two', () => {
+      events.push('two');
+      return () => events.push('cleanup-two');
+    });
+
+    router.navigate('/one');
+    router.navigate('/two');
+    router.removeRoute('/two');
+    router.navigate('/one');
+    router.stop();
+
+    assert.deepStrictEqual(events, [
+      'one',
+      'cleanup-one',
+      'two',
+      'cleanup-two',
+      'one',
+      'cleanup-one'
+    ]);
     cleanup();
   });
 
@@ -150,7 +224,44 @@ describe('V2 router', function () {
     assert.equal(hit, true);
     router.stop();
     assert.strictEqual(listeners.navigate, undefined);
+
+    const baseRouter = new window.Ity.Router({ autoStart: false, base: '/app' });
+    let outsideIntercepted = false;
+    baseRouter.start();
+    listeners.navigate({
+      canIntercept: true,
+      destination: { url: `${window.location.origin}/outside` },
+      intercept() {
+        outsideIntercepted = true;
+      }
+    });
+    assert.strictEqual(outsideIntercepted, false);
+    baseRouter.stop();
+
     Object.defineProperty(window, 'navigation', { configurable: true, value: originalNavigation });
+    cleanup();
+  });
+
+  it('runs notFound cleanup when the route changes or the router stops', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><main></main>', 'https://example.com/missing');
+    let cleaned = 0;
+    const router = new window.Ity.Router({
+      autoStart: false,
+      notFound() {
+        return () => {
+          cleaned += 1;
+        };
+      }
+    });
+
+    router.add('/found', () => undefined);
+    router.check();
+    assert.strictEqual(cleaned, 0);
+    router.navigate('/found');
+    assert.strictEqual(cleaned, 1);
+    router.navigate('/missing-again');
+    router.stop();
+    assert.strictEqual(cleaned, 2);
     cleanup();
   });
 });

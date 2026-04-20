@@ -79,6 +79,87 @@ describe('V2 components', function () {
     cleanup();
   });
 
+  it('restarts render effects and context effects when reconnected', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><main id="root"></main>');
+    const tag = 'ity-v2-reconnect-a';
+    const count = window.Ity.signal(1);
+    let effectRuns = 0;
+    let cleanups = 0;
+    let connected = 0;
+    let disconnected = 0;
+
+    window.Ity.component(tag, (ctx: any) => {
+      ctx.onConnected(() => {
+        connected += 1;
+      });
+      ctx.onDisconnected(() => {
+        disconnected += 1;
+      });
+      ctx.effect((onCleanup: any) => {
+        effectRuns += 1;
+        ctx.host.setAttribute('data-count', String(count()));
+        onCleanup(() => {
+          cleanups += 1;
+        });
+      });
+      return () => window.Ity.html`<span>${count}</span>`;
+    }, { shadow: false });
+
+    const root = document.getElementById('root');
+    const el = document.createElement(tag);
+    root.appendChild(el);
+    assert.strictEqual(el.querySelector('span').textContent, '1');
+    assert.strictEqual(el.getAttribute('data-count'), '1');
+
+    el.remove();
+    count.set(2);
+    assert.strictEqual(el.querySelector('span').textContent, '1');
+    assert.strictEqual(el.getAttribute('data-count'), '1');
+
+    root.appendChild(el);
+    assert.strictEqual(el.querySelector('span').textContent, '2');
+    assert.strictEqual(el.getAttribute('data-count'), '2');
+    count.set(3);
+    assert.strictEqual(el.querySelector('span').textContent, '3');
+    assert.strictEqual(el.getAttribute('data-count'), '3');
+
+    assert.strictEqual(connected, 2);
+    assert.strictEqual(disconnected, 1);
+    assert(cleanups >= 1);
+    assert(effectRuns >= 3);
+    cleanup();
+  });
+
+  it('supports registering and disposing context effects after connection', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><main id="root"></main>');
+    const tag = 'ity-v2-late-effect-a';
+    const count = window.Ity.signal(1);
+    let ctxRef: any = null;
+    let runs = 0;
+
+    window.Ity.component(tag, (ctx: any) => {
+      ctxRef = ctx;
+      return () => window.Ity.html`<span>${count}</span>`;
+    }, { shadow: false });
+
+    const el = document.createElement(tag);
+    document.getElementById('root').appendChild(el);
+    const stop = ctxRef.effect(() => {
+      runs += 1;
+      ctxRef.host.setAttribute('data-late', String(count()));
+    });
+
+    assert.strictEqual(runs, 1);
+    count.set(2);
+    assert.strictEqual(runs, 2);
+    assert.strictEqual(el.getAttribute('data-late'), '2');
+    stop();
+    count.set(3);
+    assert.strictEqual(runs, 2);
+    assert.strictEqual(el.getAttribute('data-late'), '2');
+    cleanup();
+  });
+
   it('returns an existing definition instead of redefining a tag', function () {
     const cleanup = setupDOM();
     const tag = 'ity-v2-existing-a';

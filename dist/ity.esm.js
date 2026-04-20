@@ -2,6 +2,7 @@ const defaultEquals = Object.is;
 let activeObserver = null;
 let batchDepth = 0;
 const pendingEffects = new Set();
+let configuredSanitizeHTML;
 function getWindow() {
     return typeof window !== "undefined" ? window : undefined;
 }
@@ -236,17 +237,32 @@ function isSignal(value) {
 function resolveSignal(value) {
     return isSignal(value) ? value() : value;
 }
+function configure(options = {}) {
+    configuredSanitizeHTML = options.sanitizeHTML || undefined;
+}
 function store(initialValue) {
     const keys = new Set(Reflect.ownKeys(initialValue));
     const signals = new Map();
+    const structure = signal(0);
     const ensureSignal = (key) => {
         if (!signals.has(key)) {
             signals.set(key, signal(initialValue[key]));
-            keys.add(key);
         }
         return signals.get(key);
     };
+    const bumpStructure = () => {
+        structure.update((version) => version + 1);
+    };
+    const setKey = (key, value) => {
+        const hadKey = keys.has(key);
+        if (!hadKey)
+            keys.add(key);
+        ensureSignal(key).set(value);
+        if (!hadKey)
+            bumpStructure();
+    };
     const snapshot = () => {
+        structure();
         const out = {};
         for (const key of keys) {
             out[key] = ensureSignal(key)();
@@ -261,7 +277,7 @@ function store(initialValue) {
                 return;
             batch(() => {
                 for (const key of Reflect.ownKeys(next)) {
-                    ensureSignal(key).set(next[key]);
+                    setKey(key, next[key]);
                 }
             });
         },
@@ -286,30 +302,243 @@ function store(initialValue) {
             return ensureSignal(key)();
         },
         set(_target, key, value) {
-            ensureSignal(key).set(value);
+            batch(() => {
+                setKey(key, value);
+            });
             return true;
         },
         deleteProperty(_target, key) {
             if (!keys.has(key))
                 return true;
             keys.delete(key);
-            signals.delete(key);
+            batch(() => {
+                ensureSignal(key).set(undefined);
+                bumpStructure();
+            });
             return true;
         },
         ownKeys(target) {
+            structure();
             return Array.from(new Set([...Reflect.ownKeys(target), ...keys]));
         },
         getOwnPropertyDescriptor(target, key) {
-            if (key in target)
-                return Reflect.getOwnPropertyDescriptor(target, key);
+            structure();
+            if (Object.prototype.hasOwnProperty.call(target, key)) {
+                return { ...Reflect.getOwnPropertyDescriptor(target, key), enumerable: false };
+            }
             if (!keys.has(key))
                 return undefined;
             return { enumerable: true, configurable: true };
         },
         has(target, key) {
+            structure();
             return key in target || keys.has(key);
         }
     });
+}
+function resource(loader, options = {}) {
+    const data = signal(options.initialValue);
+    const error = signal(null);
+    const pending = signal(false);
+    const statusValue = signal(options.initialValue === undefined ? "idle" : "success");
+    const loading = computed(() => pending());
+    const status = computed(() => statusValue());
+    const keepPrevious = options.keepPrevious !== false;
+    let controller = null;
+    let refreshId = 0;
+    let currentPromise = null;
+    const api = {
+        data,
+        error,
+        loading,
+        status,
+        get promise() {
+            return currentPromise;
+        },
+        refresh() {
+            refreshId += 1;
+            const id = refreshId;
+            if (controller)
+                controller.abort();
+            controller = new AbortController();
+            const signal = controller.signal;
+            const previous = data.peek();
+            pending.set(true);
+            statusValue.set("loading");
+            error.set(null);
+            if (!keepPrevious)
+                data.set(undefined);
+            currentPromise = Promise.resolve()
+                .then(() => loader({ signal, previous, refreshId: id }))
+                .then((value) => {
+                var _a;
+                if (id !== refreshId || signal.aborted)
+                    return data.peek();
+                data.set(value);
+                error.set(null);
+                statusValue.set("success");
+                (_a = options.onSuccess) === null || _a === void 0 ? void 0 : _a.call(options, value);
+                return value;
+            })
+                .catch((err) => {
+                var _a;
+                if (id !== refreshId)
+                    return data.peek();
+                error.set(err);
+                statusValue.set("error");
+                (_a = options.onError) === null || _a === void 0 ? void 0 : _a.call(options, err);
+                return data.peek();
+            })
+                .finally(() => {
+                if (id === refreshId) {
+                    pending.set(false);
+                    controller = null;
+                }
+            });
+            return currentPromise;
+        },
+        mutate(value) {
+            refreshId += 1;
+            if (controller)
+                controller.abort();
+            controller = null;
+            currentPromise = null;
+            data.set(value);
+            error.set(null);
+            pending.set(false);
+            statusValue.set(value === undefined ? "idle" : "success");
+        },
+        abort(reason) {
+            if (!controller)
+                return;
+            refreshId += 1;
+            controller.abort(reason);
+            controller = null;
+            currentPromise = null;
+            pending.set(false);
+            statusValue.set(data.peek() === undefined ? "idle" : "success");
+        }
+    };
+    if (options.immediate !== false) {
+        api.refresh();
+    }
+    return api;
+}
+function action(handler, options = {}) {
+    const data = signal(undefined);
+    const error = signal(null);
+    const count = signal(0);
+    const statusValue = signal("idle");
+    const pending = computed(() => count() > 0);
+    const pendingCount = computed(() => count());
+    const status = computed(() => statusValue());
+    let generation = 0;
+    const submit = (...args) => {
+        const runGeneration = generation;
+        count.update((value) => value + 1);
+        statusValue.set("loading");
+        error.set(null);
+        return Promise.resolve()
+            .then(() => handler(...args))
+            .then((value) => {
+            var _a;
+            if (runGeneration === generation) {
+                data.set(value);
+                error.set(null);
+                (_a = options.onSuccess) === null || _a === void 0 ? void 0 : _a.call(options, value);
+                if (count.peek() <= 1)
+                    statusValue.set("success");
+            }
+            return value;
+        })
+            .catch((err) => {
+            var _a;
+            if (runGeneration === generation) {
+                error.set(err);
+                (_a = options.onError) === null || _a === void 0 ? void 0 : _a.call(options, err);
+                if (count.peek() <= 1)
+                    statusValue.set("error");
+            }
+            throw err;
+        })
+            .finally(() => {
+            if (runGeneration !== generation)
+                return;
+            count.update((value) => Math.max(0, value - 1));
+            if (count.peek() > 0)
+                statusValue.set("loading");
+        });
+    };
+    const callable = ((...args) => submit(...args));
+    const mutableCallable = callable;
+    mutableCallable.submit = submit;
+    mutableCallable.data = data;
+    mutableCallable.error = error;
+    mutableCallable.pending = pending;
+    mutableCallable.pendingCount = pendingCount;
+    mutableCallable.status = status;
+    callable.reset = () => {
+        generation += 1;
+        data.set(undefined);
+        error.set(null);
+        count.set(0);
+        statusValue.set("idle");
+    };
+    return callable;
+}
+function form(handler, options = {}) {
+    const submitAction = action(handler, options);
+    const findForm = (event) => {
+        var _a;
+        const target = (event.currentTarget || event.target);
+        const getFormElementCtor = (node) => {
+            var _a, _b;
+            const ownerWindow = (_a = node === null || node === void 0 ? void 0 : node.ownerDocument) === null || _a === void 0 ? void 0 : _a.defaultView;
+            return (ownerWindow === null || ownerWindow === void 0 ? void 0 : ownerWindow.HTMLFormElement)
+                || ((_b = getWindow()) === null || _b === void 0 ? void 0 : _b.HTMLFormElement)
+                || (typeof HTMLFormElement !== "undefined" ? HTMLFormElement : undefined);
+        };
+        const isFormElement = (node) => {
+            const FormElement = node ? getFormElementCtor(node) : getFormElementCtor(target);
+            return Boolean(node && FormElement && node instanceof FormElement);
+        };
+        if (!getFormElementCtor(target))
+            throw new Error("Ity.form requires HTMLFormElement support");
+        if (isFormElement(target))
+            return target;
+        const closest = (_a = target === null || target === void 0 ? void 0 : target.closest) === null || _a === void 0 ? void 0 : _a.call(target, "form");
+        if (isFormElement(closest))
+            return closest;
+        throw new Error("Ity.form onSubmit requires a form event target");
+    };
+    const createFormData = (formElement) => {
+        var _a, _b;
+        const ownerWindow = (_a = formElement.ownerDocument) === null || _a === void 0 ? void 0 : _a.defaultView;
+        const FormDataCtor = (ownerWindow === null || ownerWindow === void 0 ? void 0 : ownerWindow.FormData)
+            || ((_b = getWindow()) === null || _b === void 0 ? void 0 : _b.FormData)
+            || (typeof FormData !== "undefined" ? FormData : undefined);
+        if (!FormDataCtor)
+            throw new Error("Ity.form requires FormData support");
+        return new FormDataCtor(formElement);
+    };
+    return {
+        action: submitAction,
+        data: submitAction.data,
+        error: submitAction.error,
+        pending: submitAction.pending,
+        status: submitAction.status,
+        async onSubmit(event) {
+            event.preventDefault();
+            const formElement = findForm(event);
+            const result = await submitAction(createFormData(formElement), event);
+            if (options.resetOnSuccess)
+                formElement.reset();
+            return result;
+        },
+        reset() {
+            submitAction.reset();
+        }
+    };
 }
 function html(strings, ...values) {
     return {
@@ -318,10 +547,11 @@ function html(strings, ...values) {
         values
     };
 }
-function unsafeHTML(value) {
+function unsafeHTML(value, options = {}) {
+    const sanitizer = options.sanitize || configuredSanitizeHTML;
     return {
         isUnsafeHTML: true,
-        value: String(value)
+        value: sanitizer ? sanitizer(String(value)) : String(value)
     };
 }
 function isTemplateResult(value) {
@@ -615,8 +845,9 @@ function component(name, setupOrOptions, maybeOptions = {}) {
             this.attrSignals = new Map();
             this.connectedCallbacks = [];
             this.disconnectedCallbacks = [];
-            this.effectHandles = [];
+            this.effectRecords = [];
             this.initialized = false;
+            this.connected = false;
         }
         static get observedAttributes() {
             return attrs;
@@ -629,19 +860,26 @@ function component(name, setupOrOptions, maybeOptions = {}) {
                 const ctx = this.createContext();
                 const output = (_a = definition.setup) === null || _a === void 0 ? void 0 : _a.call(definition, ctx);
                 if (output !== undefined) {
-                    this.renderCleanup = render(output, this.renderTarget, { transition: false });
+                    this.renderOutput = output;
                 }
             }
+            this.connected = true;
+            this.startRender();
+            this.startEffects();
             for (const callback of this.connectedCallbacks)
                 callback();
         }
         disconnectedCallback() {
+            var _a;
+            this.connected = false;
             if (this.renderCleanup) {
                 this.renderCleanup();
                 this.renderCleanup = undefined;
             }
-            for (const handle of this.effectHandles.splice(0))
-                handle.dispose();
+            for (const record of this.effectRecords) {
+                (_a = record.handle) === null || _a === void 0 ? void 0 : _a.dispose();
+                record.handle = undefined;
+            }
             for (const callback of this.disconnectedCallbacks)
                 callback();
         }
@@ -675,6 +913,18 @@ function component(name, setupOrOptions, maybeOptions = {}) {
                 this.renderTarget = this.mount;
             }
         }
+        startRender() {
+            if (this.renderCleanup || this.renderOutput === undefined)
+                return;
+            this.renderCleanup = render(this.renderOutput, this.renderTarget, { transition: false });
+        }
+        startEffects() {
+            for (const record of this.effectRecords) {
+                if (!record.disposed && !record.handle) {
+                    record.handle = effect(record.callback);
+                }
+            }
+        }
         ensureAttrSignal(name) {
             if (!this.attrSignals.has(name)) {
                 this.attrSignals.set(name, signal(this.getAttribute(name)));
@@ -693,9 +943,18 @@ function component(name, setupOrOptions, maybeOptions = {}) {
                     detail
                 })),
                 effect: (callback) => {
-                    const handle = effect(callback);
-                    this.effectHandles.push(handle);
-                    return handle;
+                    const record = { callback, disposed: false, handle: undefined };
+                    this.effectRecords.push(record);
+                    if (this.connected)
+                        record.handle = effect(callback);
+                    const dispose = (() => {
+                        var _a;
+                        record.disposed = true;
+                        (_a = record.handle) === null || _a === void 0 ? void 0 : _a.dispose();
+                        record.handle = undefined;
+                    });
+                    dispose.dispose = dispose;
+                    return dispose;
                 },
                 onConnected: (callback) => {
                     this.connectedCallbacks.push(callback);
@@ -1265,6 +1524,12 @@ class Router {
         this.add(pattern, handler);
     }
     removeRoute(pattern) {
+        var _a;
+        if (((_a = this.activeRoute) === null || _a === void 0 ? void 0 : _a.pattern) === pattern) {
+            this.disposeRoute();
+            this.activeRoute = undefined;
+            this.current.set(null);
+        }
         this.routes = this.routes.filter((route) => route.pattern !== pattern);
         return this;
     }
@@ -1275,7 +1540,7 @@ class Router {
             return;
         const update = () => {
             const method = options.replace ? "replaceState" : "pushState";
-            win.history[method](null, "", path);
+            win.history[method](null, "", withBasePath(path, this.base));
             this.check();
         };
         withViewTransition(update, (_a = options.transition) !== null && _a !== void 0 ? _a : this.transition);
@@ -1299,12 +1564,13 @@ class Router {
         var _a, _b;
         const win = getWindow();
         const doc = getDocument();
-        if (!win || !this.started)
-            return;
-        win.removeEventListener("popstate", this.listener);
-        doc === null || doc === void 0 ? void 0 : doc.removeEventListener("click", this.clickListener);
-        (_b = (_a = win.navigation) === null || _a === void 0 ? void 0 : _a.removeEventListener) === null || _b === void 0 ? void 0 : _b.call(_a, "navigate", this.navigationListener);
+        if (win && this.started) {
+            win.removeEventListener("popstate", this.listener);
+            doc === null || doc === void 0 ? void 0 : doc.removeEventListener("click", this.clickListener);
+            (_b = (_a = win.navigation) === null || _a === void 0 ? void 0 : _a.removeEventListener) === null || _b === void 0 ? void 0 : _b.call(_a, "navigate", this.navigationListener);
+        }
         this.started = false;
+        this.disposeRoute();
     }
     check() {
         var _a;
@@ -1312,32 +1578,49 @@ class Router {
         if (!win)
             return null;
         const url = new URL(win.location.href);
+        const routePath = stripBasePath(url.pathname, this.base);
+        if (routePath === null) {
+            this.disposeRoute();
+            this.activeRoute = undefined;
+            this.current.set(null);
+            return null;
+        }
+        const routeUrl = new URL(url.href);
+        routeUrl.pathname = routePath || "/";
         for (const route of this.routes) {
-            const routeParams = route.exec(url);
+            const routeParams = route.exec(routeUrl);
             if (!routeParams)
                 continue;
             const query = searchParamsToObject(url.search);
             const hash = searchParamsToObject(url.hash);
             const params = { ...routeParams, ...query, ...hash };
             const context = {
-                path: url.pathname,
+                path: routePath || "/",
                 url,
                 params,
                 query,
                 hash
             };
+            this.disposeRoute();
+            this.activeRoute = route;
             this.current.set(context);
-            route.handler(params, context);
+            const cleanup = route.handler(params, context);
+            if (typeof cleanup === "function")
+                this.routeCleanup = cleanup;
             return context;
         }
+        this.disposeRoute();
+        this.activeRoute = undefined;
         this.current.set(null);
-        (_a = this.notFound) === null || _a === void 0 ? void 0 : _a.call(this, {}, {
-            path: url.pathname,
+        const cleanup = (_a = this.notFound) === null || _a === void 0 ? void 0 : _a.call(this, {}, {
+            path: routePath || "/",
             url,
             params: {},
             query: searchParamsToObject(url.search),
             hash: searchParamsToObject(url.hash)
         });
+        if (typeof cleanup === "function")
+            this.routeCleanup = cleanup;
         return null;
     }
     handleLinkClick(event) {
@@ -1352,6 +1635,8 @@ class Router {
         const url = new URL(anchor.href, win.location.href);
         if (url.origin !== win.location.origin)
             return;
+        if (stripBasePath(url.pathname, this.base) === null)
+            return;
         event.preventDefault();
         this.navigate(`${url.pathname}${url.search}${url.hash}`);
     }
@@ -1363,11 +1648,20 @@ class Router {
         const url = new URL(event.destination.url, win.location.href);
         if (url.origin !== win.location.origin)
             return;
+        if (stripBasePath(url.pathname, this.base) === null)
+            return;
         event.intercept({
             handler: () => {
                 this.check();
             }
         });
+    }
+    disposeRoute() {
+        if (!this.routeCleanup)
+            return;
+        const cleanup = this.routeCleanup;
+        this.routeCleanup = undefined;
+        cleanup();
     }
 }
 function createRouteRecord(pattern, handler) {
@@ -1404,6 +1698,31 @@ function createRouteRecord(pattern, handler) {
             return params;
         }
     };
+}
+function normalizeBase(base) {
+    const normalized = normalizePath(base || "/");
+    return normalized === "" ? "" : normalized;
+}
+function withBasePath(path, base) {
+    const normalizedBase = normalizeBase(base);
+    const parsed = new URL(path || "/", "http://ity.local");
+    let pathname = normalizePath(parsed.pathname) || "/";
+    if (normalizedBase && pathname !== normalizedBase && !pathname.startsWith(`${normalizedBase}/`)) {
+        pathname = `${normalizedBase}${pathname === "/" ? "" : pathname}`;
+    }
+    return `${pathname}${parsed.search}${parsed.hash}`;
+}
+function stripBasePath(pathname, base) {
+    const normalizedBase = normalizeBase(base);
+    const normalizedPath = normalizePath(pathname) || "/";
+    if (!normalizedBase)
+        return normalizedPath;
+    if (normalizedPath === normalizedBase)
+        return "/";
+    if (normalizedPath.startsWith(`${normalizedBase}/`)) {
+        return normalizePath(normalizedPath.slice(normalizedBase.length)) || "/";
+    }
+    return null;
 }
 function compilePathPattern(pattern) {
     const keys = [];
@@ -1453,14 +1772,16 @@ const defaultRouter = signal(null);
 function route(pattern, handler) {
     let router = defaultRouter.peek();
     if (!router) {
-        router = new Router();
+        router = new Router({ autoStart: false });
         defaultRouter.set(router);
     }
     router.add(pattern, handler);
+    router.start();
     return router;
 }
 const Ity = {
-    version: "2.0.0",
+    version: "2.1.0",
+    configure,
     signal,
     computed,
     effect,
@@ -1469,6 +1790,9 @@ const Ity = {
     isSignal,
     resolveSignal,
     store,
+    resource,
+    action,
+    form,
     html,
     unsafeHTML,
     render,
@@ -1501,5 +1825,5 @@ if (win) {
     win.Ity = Ity;
 }
 
-export { Application, Collection, Model, Router, SelectorObject, View, batch, component, computed, Ity as default, effect, html, isSignal, onDOMReady, render, renderToString, resolveSignal, route, signal, store, unsafeHTML, untrack };
+export { Application, Collection, Model, Router, SelectorObject, View, action, batch, component, computed, configure, Ity as default, effect, form, html, isSignal, onDOMReady, render, renderToString, resolveSignal, resource, route, signal, store, unsafeHTML, untrack };
 //# sourceMappingURL=ity.esm.js.map

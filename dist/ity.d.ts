@@ -37,6 +37,13 @@ interface UnsafeHTML {
     readonly isUnsafeHTML: true;
     readonly value: string;
 }
+type HTMLSanitizer = (value: string) => string;
+interface UnsafeHTMLOptions {
+    sanitize?: HTMLSanitizer;
+}
+interface ItyConfig {
+    sanitizeHTML?: HTMLSanitizer | null;
+}
 interface RenderOptions {
     reactive?: boolean;
     transition?: boolean;
@@ -50,6 +57,55 @@ interface StoreApi<T extends Record<StoreKey, any>> {
     }): Cleanup;
 }
 type Store<T extends Record<StoreKey, any>> = T & StoreApi<T>;
+type AsyncStatus = "idle" | "loading" | "success" | "error";
+interface ResourceContext<T> {
+    signal: AbortSignal;
+    previous: T | undefined;
+    refreshId: number;
+}
+interface ResourceOptions<T, E = unknown> {
+    initialValue?: T;
+    immediate?: boolean;
+    keepPrevious?: boolean;
+    onSuccess?: (value: T) => void;
+    onError?: (error: E) => void;
+}
+interface Resource<T, E = unknown> {
+    readonly data: Signal<T | undefined>;
+    readonly error: Signal<E | null>;
+    readonly loading: ReadonlySignal<boolean>;
+    readonly status: ReadonlySignal<AsyncStatus>;
+    readonly promise: Promise<T | undefined> | null;
+    refresh(): Promise<T | undefined>;
+    mutate(value: T | undefined): void;
+    abort(reason?: unknown): void;
+}
+interface ActionOptions<TResult, E = unknown> {
+    onSuccess?: (value: TResult) => void;
+    onError?: (error: E) => void;
+}
+interface Action<TArgs extends unknown[], TResult, E = unknown> {
+    (...args: TArgs): Promise<TResult>;
+    submit(...args: TArgs): Promise<TResult>;
+    readonly data: Signal<TResult | undefined>;
+    readonly error: Signal<E | null>;
+    readonly pending: ReadonlySignal<boolean>;
+    readonly pendingCount: ReadonlySignal<number>;
+    readonly status: ReadonlySignal<AsyncStatus>;
+    reset(): void;
+}
+interface FormController<TResult, E = unknown> {
+    readonly action: Action<[FormData, Event], TResult, E>;
+    readonly data: Signal<TResult | undefined>;
+    readonly error: Signal<E | null>;
+    readonly pending: ReadonlySignal<boolean>;
+    readonly status: ReadonlySignal<AsyncStatus>;
+    onSubmit(event: Event): Promise<TResult>;
+    reset(): void;
+}
+interface FormOptions<TResult, E = unknown> extends ActionOptions<TResult, E> {
+    resetOnSuccess?: boolean;
+}
 declare function signal<T>(initialValue: T, options?: SignalOptions<T>): Signal<T>;
 declare function computed<T>(getter: () => T, options?: ComputedOptions<T>): ReadonlySignal<T>;
 declare function effect(callback: (onCleanup: (cleanup: Cleanup) => void) => void): EffectHandle;
@@ -57,9 +113,13 @@ declare function batch<T>(callback: () => T): T;
 declare function untrack<T>(callback: () => T): T;
 declare function isSignal<T = unknown>(value: unknown): value is ReadonlySignal<T>;
 declare function resolveSignal<T>(value: MaybeSignal<T>): T;
+declare function configure(options?: ItyConfig): void;
 declare function store<T extends Record<StoreKey, any>>(initialValue: T): Store<T>;
+declare function resource<T, E = unknown>(loader: (context: ResourceContext<T>) => Promise<T> | T, options?: ResourceOptions<T, E>): Resource<T, E>;
+declare function action<TArgs extends unknown[], TResult, E = unknown>(handler: (...args: TArgs) => Promise<TResult> | TResult, options?: ActionOptions<TResult, E>): Action<TArgs, TResult, E>;
+declare function form<TResult, E = unknown>(handler: (data: FormData, event: Event) => Promise<TResult> | TResult, options?: FormOptions<TResult, E>): FormController<TResult, E>;
 declare function html(strings: TemplateStringsArray | readonly string[], ...values: unknown[]): TemplateResult;
-declare function unsafeHTML(value: string): UnsafeHTML;
+declare function unsafeHTML(value: string, options?: UnsafeHTMLOptions): UnsafeHTML;
 declare function render(view: TemplateValue | (() => TemplateValue), target: string | Element | DocumentFragment | SelectorObject, options?: RenderOptions): Cleanup;
 declare function renderToString(view: TemplateValue | (() => TemplateValue)): string;
 interface ComponentContext {
@@ -217,7 +277,7 @@ interface RouteContext {
     query: Record<string, string>;
     hash: Record<string, string>;
 }
-type RouteHandler = (params: Record<string, string>, context: RouteContext) => void;
+type RouteHandler = (params: Record<string, string>, context: RouteContext) => void | Cleanup;
 interface RouterOptions {
     base?: string;
     autoStart?: boolean;
@@ -231,6 +291,8 @@ declare class Router {
     private readonly listener;
     private readonly clickListener;
     private readonly navigationListener;
+    private routeCleanup?;
+    private activeRoute?;
     readonly current: Signal<RouteContext | null>;
     notFound?: RouteHandler;
     base: string;
@@ -249,10 +311,12 @@ declare class Router {
     check(): RouteContext | null;
     private handleLinkClick;
     private handleNavigationEvent;
+    private disposeRoute;
 }
 declare function route(pattern: string, handler: RouteHandler): Router;
 declare const Ity: {
     version: string;
+    configure: typeof configure;
     signal: typeof signal;
     computed: typeof computed;
     effect: typeof effect;
@@ -261,6 +325,9 @@ declare const Ity: {
     isSignal: typeof isSignal;
     resolveSignal: typeof resolveSignal;
     store: typeof store;
+    resource: typeof resource;
+    action: typeof action;
+    form: typeof form;
     html: typeof html;
     unsafeHTML: typeof unsafeHTML;
     render: typeof render;
@@ -276,5 +343,5 @@ declare const Ity: {
     Collection: typeof Collection;
 };
 
-export { Application, Collection, Model, Router, SelectorObject, View, batch, component, computed, Ity as default, effect, html, isSignal, onDOMReady, render, renderToString, resolveSignal, route, signal, store, unsafeHTML, untrack };
-export type { ComponentContext, ComponentOptions, EffectHandle, ReadonlySignal, RenderOptions, RouteContext, Signal, Store, TemplateResult };
+export { Application, Collection, Model, Router, SelectorObject, View, action, batch, component, computed, configure, Ity as default, effect, form, html, isSignal, onDOMReady, render, renderToString, resolveSignal, resource, route, signal, store, unsafeHTML, untrack };
+export type { Action, ActionOptions, AsyncStatus, ComponentContext, ComponentOptions, EffectHandle, FormController, FormOptions, HTMLSanitizer, ItyConfig, ReadonlySignal, RenderOptions, Resource, ResourceContext, ResourceOptions, RouteContext, RouteHandler, Signal, Store, TemplateResult, UnsafeHTMLOptions };

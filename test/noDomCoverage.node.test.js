@@ -5,7 +5,7 @@ const assert = require('assert');
 const path = require('path');
 
 describe('No-DOM public fallbacks', function () {
-  it('runs no-window and no-document branches without a browser global', function () {
+  it('runs no-window and no-document branches without a browser global', async function () {
     const windowDescriptor = Object.getOwnPropertyDescriptor(global, 'window');
     const documentDescriptor = Object.getOwnPropertyDescriptor(global, 'document');
     Object.defineProperty(global, 'window', { configurable: true, value: undefined });
@@ -38,6 +38,8 @@ describe('No-DOM public fallbacks', function () {
       router.navigate('/nowhere');
       router.start();
       router.stop();
+      const form = ity.form(() => undefined);
+      await assert.rejects(() => form.onSubmit({ preventDefault() {} }), /HTMLFormElement support/);
       assert.throws(() => ity.render(ity.html`<p></p>`, '#root'), /Ity DOM rendering requires a document/);
       assert.throws(() => ity.component('ity-no-window-fallback', () => ity.html`<p></p>`), /Custom Elements support/);
     } finally {
