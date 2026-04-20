@@ -1,36 +1,67 @@
-declare function require(deps: string[], cb: (Ity: any) => void): void;
+(function () {
+  interface CollectionItem {
+    id: number;
+    name: string;
+  }
 
-require(['../../../Ity'], (Ity: any) => {
-  initCollection(Ity);
-});
+  interface CollectionExampleApp {
+    items: any;
+    addItem(): void;
+    removeItem(id: number): void;
+    dispose(): void;
+  }
 
-const initCollection = (Ity: any): void => {
-  const app = new Ity.Application();
-  const collection = new Ity.Collection([
-    new Ity.Model({ data: { name: 'Alice' } }),
-    new Ity.Model({ data: { name: 'Bob' } }),
-  ]);
+  const createCollectionApp = (Ity: any, target: string | Element = '#collectionApp'): CollectionExampleApp => {
+    const items = Ity.signal([
+      { id: 1, name: 'Alice' },
+      { id: 2, name: 'Bob' }
+    ]);
+    const nextId = Ity.signal(3);
 
-  const view = new Ity.View({
-    el: '#collectionApp',
-    app,
-    events: {
-      '.addItem': { click: 'addItem' }
-    },
-    initialize: function(this: any): void {
-      this.collection = collection;
-      this.render();
-    },
-    render: function(this: any): void {
-      const html = this.collection.models
-        .map((m: any) => `<li>${m.get('name')}</li>`) 
-        .join('');
-      this.select('ul').html(html);
-    },
-    addItem: function(this: any): void {
-      const name = `Item ${this.collection.models.length + 1}`;
-      this.collection.add(new Ity.Model({ data: { name } }));
-      this.render();
-    }
-  });
-};
+    const addItem = (): void => {
+      const id = nextId.peek();
+      nextId.set(id + 1);
+      items.update((current: CollectionItem[]) => [
+        ...current,
+        { id, name: `Item ${id}` }
+      ]);
+    };
+
+    const removeItem = (id: number): void => {
+      items.update((current: CollectionItem[]) => current.filter((item) => item.id !== id));
+    };
+
+    const dispose = Ity.render(() => Ity.html`
+      <button class="addItem" @click=${addItem}>Add</button>
+      <ul>
+        ${items().map((item: CollectionItem) => Ity.html`
+          <li data-id=${item.id}>
+            <span class="itemName">${item.name}</span>
+            <button class="removeItem" @click=${() => removeItem(item.id)}>Remove</button>
+          </li>
+        `)}
+      </ul>
+    `, target);
+
+    return {
+      items,
+      addItem,
+      removeItem,
+      dispose
+    };
+  };
+
+  const browserWindow = (globalThis as any).window;
+  if (browserWindow) {
+    browserWindow.ItyExamples ||= {};
+    browserWindow.ItyExamples.createCollectionApp = createCollectionApp;
+  }
+
+  const amdRequire = (globalThis as any).require;
+  const amdDefine = (globalThis as any).define;
+  if (browserWindow && typeof amdRequire === 'function' && typeof amdDefine === 'function' && amdDefine.amd) {
+    amdRequire(['../../../Ity'], (Ity: any) => {
+      createCollectionApp(Ity);
+    });
+  }
+})();

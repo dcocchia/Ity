@@ -9,6 +9,7 @@ const { setupDOM } = require('./helpers');
 
 describe('AMD export', function () {
   it('defines module when define.amd is present', function () {
+    delete require.cache[require.resolve('../../Ity.js')];
     global.define = function (factory: any) { global._ityModule = factory(); };
     global.define.amd = true;
     const cleanup = setupDOM();

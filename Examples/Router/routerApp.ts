@@ -1,55 +1,70 @@
-declare function require(deps: string[], cb: (Ity: any) => void): void;
+(function () {
+  interface RouterExampleApp {
+    page: any;
+    router: any;
+    goHome(): void;
+    goUser(id: string): void;
+    showHome(): void;
+    showUser(id: string): void;
+    dispose(): void;
+  }
 
-require(['../../../Ity'], (Ity: any) => {
-  initRouter(Ity);
-});
+  const createRouterApp = (Ity: any, target: string | Element = '#routerApp'): RouterExampleApp => {
+    const page = Ity.signal('');
+    const router = new Ity.Router({ autoStart: false, transition: true });
 
-const initRouter = (Ity: any): void => {
-  const app = new Ity.Application();
-  const router = new Ity.Router();
-  const view = new Ity.View({
-    el: '#routerApp',
-    app,
-    model: new Ity.Model(),
-    events: {
-      '.homeLink': {
-        click: 'goHome'
-      },
-      '.userLink': {
-        click: 'goUser'
-      }
-    },
+    const showHome = (): void => {
+      page.set('Home');
+    };
 
-    initialize: function(this: any): void {
-      router.addRoute('/', () => this.showHome());
-      router.addRoute('/users/:id', (p: any) => this.showUser(p.id));
-      this.model.on('change', this.render, this);
-    },
+    const showUser = (id: string): void => {
+      page.set(`User ${id}`);
+    };
 
-    render: function(this: any): void {
-      this.select('.content').html(this.model.get('page'));
-    },
-
-    goHome: function(this: any, e: Event): void {
-      if (e && e.preventDefault) { e.preventDefault(); }
+    const goHome = (): void => {
       router.navigate('/');
-    },
+    };
 
-    goUser: function(this: any, e: Event): void {
-      if (e && e.preventDefault) { e.preventDefault(); }
-      const id = (e.target as HTMLElement).getAttribute('data-calc-id');
-      if (id !== null) {
-        router.navigate('/users/' + id);
-      }
-    },
+    const goUser = (id: string): void => {
+      router.navigate(`/users/${id}`);
+    };
 
-    showHome: function(this: any): void {
-      this.model.set('page', 'Home');
-    },
+    router.add('/', showHome);
+    router.add('/users/:id', (params: Record<string, string>) => showUser(params.id));
 
-    showUser: function(this: any, id: string): void {
-      this.model.set('page', 'User ' + id);
-    }
-  });
-};
+    const dispose = Ity.render(() => Ity.html`
+      <nav>
+        <button class="homeLink" @click=${goHome}>Home</button>
+        <button class="userLink" data-calc-id="1" @click=${() => goUser('1')}>User 1</button>
+        <button class="userLink" data-calc-id="2" @click=${() => goUser('2')}>User 2</button>
+      </nav>
+      <div class="content">${page}</div>
+    `, target);
 
+    router.start();
+
+    return {
+      page,
+      router,
+      goHome,
+      goUser,
+      showHome,
+      showUser,
+      dispose
+    };
+  };
+
+  const browserWindow = (globalThis as any).window;
+  if (browserWindow) {
+    browserWindow.ItyExamples ||= {};
+    browserWindow.ItyExamples.createRouterApp = createRouterApp;
+  }
+
+  const amdRequire = (globalThis as any).require;
+  const amdDefine = (globalThis as any).define;
+  if (browserWindow && typeof amdRequire === 'function' && typeof amdDefine === 'function' && amdDefine.amd) {
+    amdRequire(['../../../Ity'], (Ity: any) => {
+      createRouterApp(Ity);
+    });
+  }
+})();
