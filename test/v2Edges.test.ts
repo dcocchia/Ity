@@ -58,7 +58,7 @@ describe('V2 production edge cases', function () {
     unsubscribe();
 
     assert.deepStrictEqual(state.$snapshot(), { a: 3 });
-    assert.deepStrictEqual(snapshots, [{ a: 3, b: 2 }]);
+    assert.deepStrictEqual(snapshots, [{ a: 3, b: 2 }, { a: 3 }]);
     cleanup();
   });
 

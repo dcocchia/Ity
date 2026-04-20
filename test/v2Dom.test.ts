@@ -78,6 +78,35 @@ describe('V2 DOM templates and rendering', function () {
     cleanup();
   });
 
+  it('supports per-call and global sanitizers for unsafe HTML', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><main id="root"></main>');
+    const stripScripts = (value: string) => value.replace(/<script[\s\S]*?<\/script>/gi, '');
+    const stripInlineHandlers = (value: string) => value.replace(/\son[a-z]+="[^"]*"/gi, '');
+
+    window.Ity.render(window.Ity.html`
+      <article>${window.Ity.unsafeHTML('<b>ok</b><script>bad()</script>', { sanitize: stripScripts })}</article>
+    `, '#root', { reactive: false });
+
+    assert.strictEqual(document.querySelector('b')?.textContent, 'ok');
+    assert.strictEqual(document.querySelector('script'), null);
+
+    window.Ity.configure({ sanitizeHTML: stripInlineHandlers });
+    window.Ity.render(window.Ity.html`
+      <article>${window.Ity.unsafeHTML('<button onclick="bad()">safe</button>')}</article>
+    `, '#root', { reactive: false });
+
+    assert.strictEqual(document.querySelector('button')?.textContent, 'safe');
+    assert.strictEqual(document.querySelector('button')?.hasAttribute('onclick'), false);
+
+    window.Ity.configure({ sanitizeHTML: null });
+    window.Ity.render(window.Ity.html`
+      <article>${window.Ity.unsafeHTML('<button onclick="allowed()">raw</button>')}</article>
+    `, '#root', { reactive: false });
+
+    assert.strictEqual(document.querySelector('button')?.getAttribute('onclick'), 'allowed()');
+    cleanup();
+  });
+
   it('can render once without reactivity and render into a SelectorObject', function () {
     const cleanup = setupDOM('<!DOCTYPE html><main id="root"></main>');
     const count = window.Ity.signal(1);

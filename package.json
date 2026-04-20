@@ -1,6 +1,6 @@
 {
   "name": "ity",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "A tiny dependency-free reactive app kernel with MVC compatibility",
   "main": "dist/ity.cjs.js",
   "module": "dist/ity.esm.mjs",
@@ -9,12 +9,23 @@
   "unpkg": "dist/ity.min.js",
   "jsdelivr": "dist/ity.min.js",
   "exports": {
-    "import": "./dist/ity.esm.mjs",
-    "require": "./dist/ity.cjs.js"
+    ".": {
+      "types": "./dist/ity.d.ts",
+      "browser": "./dist/ity.esm.js",
+      "import": "./dist/ity.esm.mjs",
+      "require": "./dist/ity.cjs.js",
+      "default": "./dist/ity.esm.mjs"
+    },
+    "./browser": {
+      "types": "./dist/ity.d.ts",
+      "default": "./dist/ity.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist/",
     "README.md",
+    "MIGRATION.md",
     "LICENSE"
   ],
   "engines": {

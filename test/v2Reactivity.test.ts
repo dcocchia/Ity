@@ -116,6 +116,75 @@ describe('V2 reactivity', function () {
     cleanup();
   });
 
+  it('stores notify subscribers when keys are added and deleted', function () {
+    const cleanup = setupDOM();
+    const state = window.Ity.store({ name: 'Ada' });
+    const snapshots: any[] = [];
+    const rendered: string[] = [];
+
+    const unsubscribe = state.$subscribe((value: any) => snapshots.push(value), { immediate: true });
+    const stop = window.Ity.effect(() => {
+      rendered.push(`${state.name}:${state.role}`);
+    });
+
+    state.role = 'admin';
+    delete state.name;
+    delete state.role;
+
+    unsubscribe();
+    stop();
+
+    assert.deepStrictEqual(snapshots, [
+      { name: 'Ada' },
+      { name: 'Ada', role: 'admin' },
+      { role: 'admin' },
+      {}
+    ]);
+    assert.deepStrictEqual(rendered, [
+      'Ada:undefined',
+      'Ada:admin',
+      'undefined:admin',
+      'undefined:undefined'
+    ]);
+    assert.deepStrictEqual(state.$snapshot(), {});
+    cleanup();
+  });
+
+  it('tracks store structure through reflection and existence checks', function () {
+    const cleanup = setupDOM();
+    const state = window.Ity.store({ optional: undefined });
+    const keys: string[] = [];
+    const hasOptional: boolean[] = [];
+
+    const stopKeys = window.Ity.effect(() => {
+      keys.push(Object.keys(state).join(','));
+    });
+    const stopHas = window.Ity.effect(() => {
+      hasOptional.push('optional' in state);
+    });
+
+    delete state.optional;
+    state.optional = undefined;
+    delete state.optional;
+
+    stopKeys();
+    stopHas();
+
+    assert.deepStrictEqual(keys, ['optional', '', 'optional', '']);
+    assert.deepStrictEqual(hasOptional, [true, false, true, false]);
+    cleanup();
+  });
+
+  it('does not add store keys when reading missing properties', function () {
+    const cleanup = setupDOM();
+    const state = window.Ity.store({});
+
+    assert.strictEqual(state.missing, undefined);
+    assert.deepStrictEqual(Object.keys(state), []);
+    assert.strictEqual('missing' in state, false);
+    cleanup();
+  });
+
   it('detects signals and resolves MaybeSignal values', function () {
     const cleanup = setupDOM();
     const name = window.Ity.signal('Ity');
