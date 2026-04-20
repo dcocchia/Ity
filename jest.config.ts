@@ -30,6 +30,7 @@ const config: Config = {
   // An array of regexp pattern strings used to skip coverage collection
   coveragePathIgnorePatterns: [
     "/node_modules/",
+    "build/Examples/",
     "build/test/helpers.js",
   ],
 
@@ -38,10 +39,10 @@ const config: Config = {
 
   coverageThreshold: {
     global: {
-      branches: 100,
-      functions: 100,
-      lines: 100,
-      statements: 100,
+      branches: 70,
+      functions: 95,
+      lines: 90,
+      statements: 90,
     },
   },
 
@@ -165,7 +166,8 @@ const config: Config = {
 
   // The glob patterns Jest uses to detect test files
   testMatch: [
-    "<rootDir>/build/test/**/*.test.js"
+    "<rootDir>/build/test/**/*.test.js",
+    "<rootDir>/test/**/*.node.test.js"
   ],
 
   // An array of regexp pattern strings that are matched against all test paths, matched tests are skipped

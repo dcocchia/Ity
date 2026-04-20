@@ -6,60 +6,57 @@ declare function it(desc: string, fn: () => any): void;
 const assert = require('assert');
 const { setupDOM } = require('./helpers');
 
-// Logic from the router example
-function createRouterView(Ity: any): any {
-  const router = new Ity.Router();
-  const view = new Ity.View({
-    el: '#routerApp',
-    app: new Ity.Application(),
-    model: new Ity.Model(),
-    events: {
-      '.homeLink': { click: 'goHome' },
-      '.userLink': { click: 'goUser' }
-    },
-    initialize: function() {
-      router.addRoute('/', () => this.showHome());
-      router.addRoute('/users/:id', p => this.showUser(p.id));
-      this.model.on('change', this.render, this);
-    },
-    render: function() {
-      this.select('.content').html(this.model.get('page'));
-    },
-    goHome: function(e: Event) {
-      if (e && e.preventDefault) e.preventDefault();
-      router.navigate('/');
-    },
-    goUser: function(e: Event) {
-      if (e && e.preventDefault) e.preventDefault();
-      const id = (e.target as HTMLElement).getAttribute('data-calc-id');
-      if (id !== null) router.navigate('/users/' + id);
-    },
-    showHome: function() {
-      this.model.set('page', 'Home');
-    },
-    showUser: function(id: string) {
-      this.model.set('page', 'User ' + id);
-    }
-  });
-  return { view, router };
+function loadRouterExample(): any {
+  const modulePath = '../Examples/Router/routerApp.js';
+  delete require.cache[require.resolve(modulePath)];
+  require(modulePath);
+  return window.ItyExamples.createRouterApp;
 }
 
-describe('Router example logic', function () {
-  it('navigates home on click', function () {
-    const cleanup = setupDOM('<!DOCTYPE html><div id="routerApp"><button class="homeLink"></button><button class="userLink" data-calc-id="1"></button><div class="content"></div></div>');
-    const { view } = createRouterView(window.Ity);
-    const btn = document.querySelector('.homeLink') as HTMLElement;
-    btn.dispatchEvent(new window.Event('click', { bubbles: true }));
-    assert.strictEqual(view.model.get('page'), 'Home');
+describe('Router example', function () {
+  it('renders route content from a V2 page signal', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="routerApp"></div>');
+    window.history.pushState(null, '', '/');
+    const createRouterApp = loadRouterExample();
+    const app = createRouterApp(window.Ity, '#routerApp');
+
+    assert.strictEqual(app.page(), 'Home');
+    assert.strictEqual(document.querySelector('.content')?.textContent, 'Home');
+
+    app.router.stop();
+    app.dispose();
     cleanup();
   });
 
-  it('navigates to user route', function () {
-    const cleanup = setupDOM('<!DOCTYPE html><div id="routerApp"><button class="homeLink"></button><button class="userLink" data-calc-id="5"></button><div class="content"></div></div>');
-    const { view } = createRouterView(window.Ity);
-    const btn = document.querySelector('.userLink') as HTMLElement;
-    btn.dispatchEvent(new window.Event('click', { bubbles: true }));
-    assert.strictEqual(view.model.get('page'), 'User 5');
+  it('navigates to user routes from rendered V2 event handlers', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="routerApp"></div>');
+    window.history.pushState(null, '', '/');
+    const createRouterApp = loadRouterExample();
+    const app = createRouterApp(window.Ity, '#routerApp');
+    const userBtn = document.querySelector('.userLink[data-calc-id="2"]') as HTMLElement;
+
+    userBtn.click();
+
+    assert.strictEqual(app.page(), 'User 2');
+    assert.strictEqual(document.querySelector('.content')?.textContent, 'User 2');
+    app.router.stop();
+    app.dispose();
+    cleanup();
+  });
+
+  it('keeps route helpers callable for tests and demos', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="routerApp"></div>');
+    window.history.pushState(null, '', '/');
+    const createRouterApp = loadRouterExample();
+    const app = createRouterApp(window.Ity, '#routerApp');
+
+    app.goUser('5');
+    assert.strictEqual(app.page(), 'User 5');
+    app.goHome();
+    assert.strictEqual(app.page(), 'Home');
+
+    app.router.stop();
+    app.dispose();
     cleanup();
   });
 });

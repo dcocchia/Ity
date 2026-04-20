@@ -12,5 +12,5 @@
     "declarationDir": "types"
   },
   "include": ["**/*.ts"],
-  "exclude": ["Examples/**/*", "types/**/*", "jest.config.ts"]
+  "exclude": ["types/**/*", "jest.config.ts"]
 }

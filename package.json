@@ -1,12 +1,12 @@
 {
   "name": "ity",
-  "version": "1.0.0",
-  "description": "A miniscule, depedency free JavaScript MVC",
+  "version": "2.0.0",
+  "description": "A tiny dependency-free reactive app kernel with MVC compatibility",
   "main": "dist/ity.cjs.js",
-  "module": "dist/ity.esm.js",
+  "module": "dist/ity.esm.mjs",
   "types": "dist/ity.d.ts",
   "exports": {
-    "import": "./dist/ity.esm.js",
+    "import": "./dist/ity.esm.mjs",
     "require": "./dist/ity.cjs.js"
   },
   "engines": {
@@ -15,10 +15,10 @@
   "scripts": {
     "test": "jest",
     "pretest": "tsc -p tsconfig.json && cp build/Ity.js Ity.js",
-    "coverage": "jest --coverage",
     "precoverage": "tsc -p tsconfig.json && cp build/Ity.js Ity.js",
-    "build": "rollup -c",
-    "test:dist": "ITY_FILE=dist/ity.min.js npm test"
+    "coverage": "jest --coverage",
+    "build": "tsc -p tsconfig.json && rollup -c",
+    "test:dist": "ITY_FILE=../../dist/ity.min.js npm test -- --coverage=false"
   },
   "devDependencies": {
     "@rollup/plugin-terser": "^0.4.4",
@@ -37,9 +37,10 @@
   },
   "keywords": [
     "ity",
+    "reactivity",
+    "signals",
+    "web-components",
     "mvc",
-    "model",
-    "view",
     "spa"
   ],
   "author": "Dominic Cocchiarella",

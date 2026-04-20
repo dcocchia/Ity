@@ -1,7 +1,3 @@
-'use strict';
-
-Object.defineProperty(exports, '__esModule', { value: true });
-
 const defaultEquals = Object.is;
 let activeObserver = null;
 let batchDepth = 0;
@@ -1505,26 +1501,5 @@ if (win) {
     win.Ity = Ity;
 }
 
-exports.Application = Application;
-exports.Collection = Collection;
-exports.Model = Model;
-exports.Router = Router;
-exports.SelectorObject = SelectorObject;
-exports.View = View;
-exports.batch = batch;
-exports.component = component;
-exports.computed = computed;
-exports.default = Ity;
-exports.effect = effect;
-exports.html = html;
-exports.isSignal = isSignal;
-exports.onDOMReady = onDOMReady;
-exports.render = render;
-exports.renderToString = renderToString;
-exports.resolveSignal = resolveSignal;
-exports.route = route;
-exports.signal = signal;
-exports.store = store;
-exports.unsafeHTML = unsafeHTML;
-exports.untrack = untrack;
-//# sourceMappingURL=ity.cjs.js.map
+export { Application, Collection, Model, Router, SelectorObject, View, batch, component, computed, Ity as default, effect, html, isSignal, onDOMReady, render, renderToString, resolveSignal, route, signal, store, unsafeHTML, untrack };
+//# sourceMappingURL=ity.esm.mjs.map
