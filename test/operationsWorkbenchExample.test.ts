@@ -108,6 +108,46 @@ describe('Operations Workbench example', function () {
     cleanup();
   });
 
+  it('keeps task form focus stable across successive keystrokes', async function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="operationsWorkbenchApp"></div>');
+    window.history.pushState(null, '', '/lab/workbench/tasks/new');
+    const createOperationsWorkbenchApp = loadWorkbenchExample();
+    const app = createOperationsWorkbenchApp(window.Ity, {
+      target: '#operationsWorkbenchApp',
+      base: '/lab/workbench',
+      storage: createStorage(),
+      storageKey: 'ops-workbench-focus',
+      latencyMs: 0
+    });
+
+    await waitForWorkspace(app);
+
+    let title = document.getElementById('taskTitle') as HTMLInputElement;
+    title.focus();
+    title.value = 'C';
+    title.setSelectionRange(1, 1);
+    title.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await flush();
+
+    title = document.getElementById('taskTitle') as HTMLInputElement;
+    assert.strictEqual(document.activeElement, title);
+    assert.strictEqual(title.value, 'C');
+    assert.strictEqual(title.selectionStart, 1);
+
+    title.value = 'Co';
+    title.setSelectionRange(2, 2);
+    title.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await flush();
+
+    title = document.getElementById('taskTitle') as HTMLInputElement;
+    assert.strictEqual(document.activeElement, title);
+    assert.strictEqual(title.value, 'Co');
+    assert.strictEqual(title.selectionStart, 2);
+
+    app.dispose();
+    cleanup();
+  });
+
   it('updates detail state through checklist toggles and status actions', async function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="operationsWorkbenchApp"></div>');
     window.history.pushState(null, '', '/lab/workbench/tasks/task-flags');

@@ -1,6 +1,6 @@
 {
   "name": "ity",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "A tiny dependency-free reactive app kernel with MVC compatibility",
   "main": "dist/ity.cjs.js",
   "module": "dist/ity.esm.mjs",
