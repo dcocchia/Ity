@@ -1334,6 +1334,22 @@ interface Binding {
   name?: string;
 }
 
+interface FocusSelectionState {
+  start: number;
+  end: number;
+  direction?: "forward" | "backward" | "none" | null;
+}
+
+interface FocusRestoreState {
+  path: number[];
+  tagName: string;
+  id: string | null;
+  name: string | null;
+  type: string | null;
+  placeholder: string | null;
+  selection: FocusSelectionState | null;
+}
+
 function bindingFromName(rawName: string): Pick<Binding, "kind" | "name"> {
   const first = rawName[0];
   const kind = first === "@" ? "event" : first === "." ? "prop" : first === "?" ? "bool" : "attr";
@@ -1465,6 +1481,153 @@ function applyElementBinding(element: HTMLElement, binding: Binding, value: unkn
   element.setAttribute(name, value === true ? "" : String(value));
 }
 
+function getDeepActiveElement(doc: Document | undefined): HTMLElement | null {
+  if (!doc) return null;
+  let active = doc.activeElement as HTMLElement | null;
+  while (active && (active as any).shadowRoot?.activeElement) {
+    active = (active as any).shadowRoot.activeElement as HTMLElement | null;
+  }
+  return active;
+}
+
+function nodeContains(root: Node, node: Node): boolean {
+  return root === node || typeof (root as any).contains === "function" && (root as any).contains(node);
+}
+
+function captureNodePath(root: Node, node: Node): number[] | null {
+  const path: number[] = [];
+  let current: Node | null = node;
+  while (current && current !== root) {
+    const parent: Node | null = current.parentNode;
+    if (!parent) return null;
+    path.unshift(Array.prototype.indexOf.call(parent.childNodes, current));
+    current = parent;
+  }
+  return current === root ? path : null;
+}
+
+function resolveNodePath(root: Node, path: readonly number[]): Node | null {
+  let current: Node | null = root;
+  for (const index of path) {
+    if (!current?.childNodes || index < 0 || index >= current.childNodes.length) return null;
+    current = current.childNodes[index];
+  }
+  return current;
+}
+
+function captureSelectionState(element: HTMLElement): FocusSelectionState | null {
+  const target = element as any;
+  if (typeof target.selectionStart !== "number" || typeof target.selectionEnd !== "number") return null;
+  return {
+    start: target.selectionStart,
+    end: target.selectionEnd,
+    direction: target.selectionDirection
+  };
+}
+
+function getElementName(element: HTMLElement): string | null {
+  return typeof (element as any).name === "string"
+    ? ((element as any).name || null)
+    : element.getAttribute("name");
+}
+
+function getElementType(element: HTMLElement): string | null {
+  return typeof (element as any).type === "string"
+    ? ((element as any).type || null)
+    : element.getAttribute("type");
+}
+
+function getElementPlaceholder(element: HTMLElement): string | null {
+  return typeof (element as any).placeholder === "string"
+    ? ((element as any).placeholder || null)
+    : element.getAttribute("placeholder");
+}
+
+function captureFocusState(target: Element | DocumentFragment): FocusRestoreState | null {
+  const doc = target.ownerDocument || getDocument();
+  const active = getDeepActiveElement(doc);
+  if (!active || !nodeContains(target, active)) return null;
+  const path = captureNodePath(target, active);
+  if (!path) return null;
+  return {
+    path,
+    tagName: active.tagName,
+    id: active.id || null,
+    name: getElementName(active),
+    type: getElementType(active),
+    placeholder: getElementPlaceholder(active),
+    selection: captureSelectionState(active)
+  };
+}
+
+function matchesFocusState(element: HTMLElement, state: FocusRestoreState): boolean {
+  if (element.tagName !== state.tagName) return false;
+  if (state.id && element.id !== state.id) return false;
+  if (state.name && getElementName(element) !== state.name) return false;
+  if (state.type && getElementType(element) !== state.type) return false;
+  return true;
+}
+
+function findFocusCandidate(target: Element | DocumentFragment, state: FocusRestoreState): HTMLElement | null {
+  if (state.id) {
+    const byId = target.ownerDocument?.getElementById(state.id) as HTMLElement | null;
+    if (byId && nodeContains(target, byId) && matchesFocusState(byId, state)) return byId;
+  }
+
+  if (state.name && typeof (target as ParentNode).querySelectorAll === "function") {
+    const matches = Array.from((target as ParentNode).querySelectorAll(state.tagName.toLowerCase()))
+      .filter((entry): entry is HTMLElement => entry instanceof (target.ownerDocument?.defaultView?.HTMLElement || HTMLElement))
+      .filter((entry) => getElementName(entry) === state.name)
+      .filter((entry) => matchesFocusState(entry, state));
+    if (matches.length === 1) return matches[0];
+  }
+
+  const byPath = resolveNodePath(target, state.path);
+  if (byPath instanceof (target.ownerDocument?.defaultView?.HTMLElement || HTMLElement) && byPath.tagName === state.tagName) {
+    return byPath;
+  }
+
+  return null;
+}
+
+function restoreSelectionState(element: HTMLElement, selection: FocusSelectionState | null): void {
+  if (!selection) return;
+  const target = element as any;
+  if (typeof target.setSelectionRange !== "function" || typeof target.value !== "string") return;
+  const length = target.value.length;
+  const start = Math.max(0, Math.min(selection.start, length));
+  const end = Math.max(start, Math.min(selection.end, length));
+  try {
+    target.setSelectionRange(start, end, selection.direction || undefined);
+  } catch (_error) {
+    target.setSelectionRange(start, end);
+  }
+}
+
+function restoreFocusState(target: Element | DocumentFragment, state: FocusRestoreState | null): void {
+  if (!state) return;
+  const candidate = findFocusCandidate(target, state);
+  if (!candidate || typeof candidate.focus !== "function") return;
+  const apply = () => {
+    if (!candidate.isConnected) return;
+    try {
+      candidate.focus({ preventScroll: true } as FocusOptions);
+    } catch (_error) {
+      candidate.focus();
+    }
+    restoreSelectionState(candidate, state.selection);
+  };
+  apply();
+  const doc = target.ownerDocument || getDocument();
+  if (doc?.activeElement !== candidate) {
+    if (typeof queueMicrotask === "function") {
+      queueMicrotask(apply);
+    } else {
+      Promise.resolve().then(apply).catch(() => undefined);
+    }
+  }
+}
+
 function resolveTarget(target: string | Element | DocumentFragment | SelectorObject): Element | DocumentFragment {
   if (typeof target === "string") {
     const found = documentOrThrow().querySelector(target);
@@ -1480,13 +1643,16 @@ function resolveTarget(target: string | Element | DocumentFragment | SelectorObj
 }
 
 function replaceChildren(target: Element | DocumentFragment, fragment: DocumentFragment): void {
+  const focusState = captureFocusState(target);
   const maybeTarget = target as any;
   if (typeof maybeTarget.replaceChildren === "function") {
     maybeTarget.replaceChildren(fragment);
+    restoreFocusState(target, focusState);
     return;
   }
   while (target.firstChild) target.removeChild(target.firstChild);
   target.appendChild(fragment);
+  restoreFocusState(target, focusState);
 }
 
 function withViewTransition(update: () => void, enabled: boolean | undefined): void {

@@ -6,6 +6,12 @@ declare function it(desc: string, fn: () => any): void;
 const assert = require('assert');
 const { setupDOM } = require('./helpers');
 
+async function flush(): Promise<void> {
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await Promise.resolve();
+}
+
 describe('V2 DOM templates and rendering', function () {
   it('renders text safely, reacts to signals and binds events', function () {
     const cleanup = setupDOM('<!DOCTYPE html><main id="root"></main>');
@@ -156,6 +162,52 @@ describe('V2 DOM templates and rendering', function () {
 
     assert.equal(document.querySelector('span')?.textContent, '1');
     stop();
+    cleanup();
+  });
+
+  it('preserves input focus and text selection across full reactive rerenders', async function () {
+    const cleanup = setupDOM('<!DOCTYPE html><main id="root"></main>');
+    const state = window.Ity.store({ text: '' });
+
+    window.Ity.render(() => window.Ity.html`
+      <label>
+        <span>Title</span>
+        <input
+          .value=${state.text}
+          placeholder=${state.text ? `Length ${state.text.length}` : 'Start typing'}
+          @input=${(event: Event) => {
+            state.text = (event.target as HTMLInputElement).value;
+          }}
+        >
+      </label>
+      <p>${state.text}</p>
+    `, '#root');
+
+    let input = document.querySelector('input') as HTMLInputElement;
+    input.focus();
+    input.value = 'ab';
+    input.setSelectionRange(2, 2);
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await flush();
+
+    input = document.querySelector('input') as HTMLInputElement;
+    assert.strictEqual(document.activeElement, input);
+    assert.strictEqual(input.value, 'ab');
+    assert.strictEqual(input.getAttribute('placeholder'), 'Length 2');
+    assert.strictEqual(input.selectionStart, 2);
+    assert.strictEqual(input.selectionEnd, 2);
+
+    input.value = 'abc';
+    input.setSelectionRange(3, 3);
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await flush();
+
+    input = document.querySelector('input') as HTMLInputElement;
+    assert.strictEqual(document.activeElement, input);
+    assert.strictEqual(input.value, 'abc');
+    assert.strictEqual(input.getAttribute('placeholder'), 'Length 3');
+    assert.strictEqual(input.selectionStart, 3);
+    assert.strictEqual(input.selectionEnd, 3);
     cleanup();
   });
 

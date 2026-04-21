@@ -1163,6 +1163,159 @@ function applyElementBinding(element, binding, value) {
     }
     element.setAttribute(name, value === true ? "" : String(value));
 }
+function getDeepActiveElement(doc) {
+    var _a;
+    if (!doc)
+        return null;
+    let active = doc.activeElement;
+    while (active && ((_a = active.shadowRoot) === null || _a === void 0 ? void 0 : _a.activeElement)) {
+        active = active.shadowRoot.activeElement;
+    }
+    return active;
+}
+function nodeContains(root, node) {
+    return root === node || typeof root.contains === "function" && root.contains(node);
+}
+function captureNodePath(root, node) {
+    const path = [];
+    let current = node;
+    while (current && current !== root) {
+        const parent = current.parentNode;
+        if (!parent)
+            return null;
+        path.unshift(Array.prototype.indexOf.call(parent.childNodes, current));
+        current = parent;
+    }
+    return current === root ? path : null;
+}
+function resolveNodePath(root, path) {
+    let current = root;
+    for (const index of path) {
+        if (!(current === null || current === void 0 ? void 0 : current.childNodes) || index < 0 || index >= current.childNodes.length)
+            return null;
+        current = current.childNodes[index];
+    }
+    return current;
+}
+function captureSelectionState(element) {
+    const target = element;
+    if (typeof target.selectionStart !== "number" || typeof target.selectionEnd !== "number")
+        return null;
+    return {
+        start: target.selectionStart,
+        end: target.selectionEnd,
+        direction: target.selectionDirection
+    };
+}
+function getElementName(element) {
+    return typeof element.name === "string"
+        ? (element.name || null)
+        : element.getAttribute("name");
+}
+function getElementType(element) {
+    return typeof element.type === "string"
+        ? (element.type || null)
+        : element.getAttribute("type");
+}
+function getElementPlaceholder(element) {
+    return typeof element.placeholder === "string"
+        ? (element.placeholder || null)
+        : element.getAttribute("placeholder");
+}
+function captureFocusState(target) {
+    const doc = target.ownerDocument || getDocument();
+    const active = getDeepActiveElement(doc);
+    if (!active || !nodeContains(target, active))
+        return null;
+    const path = captureNodePath(target, active);
+    if (!path)
+        return null;
+    return {
+        path,
+        tagName: active.tagName,
+        id: active.id || null,
+        name: getElementName(active),
+        type: getElementType(active),
+        placeholder: getElementPlaceholder(active),
+        selection: captureSelectionState(active)
+    };
+}
+function matchesFocusState(element, state) {
+    if (element.tagName !== state.tagName)
+        return false;
+    if (state.id && element.id !== state.id)
+        return false;
+    if (state.name && getElementName(element) !== state.name)
+        return false;
+    if (state.type && getElementType(element) !== state.type)
+        return false;
+    return true;
+}
+function findFocusCandidate(target, state) {
+    var _a, _b, _c;
+    if (state.id) {
+        const byId = (_a = target.ownerDocument) === null || _a === void 0 ? void 0 : _a.getElementById(state.id);
+        if (byId && nodeContains(target, byId) && matchesFocusState(byId, state))
+            return byId;
+    }
+    if (state.name && typeof target.querySelectorAll === "function") {
+        const matches = Array.from(target.querySelectorAll(state.tagName.toLowerCase()))
+            .filter((entry) => { var _a, _b; return entry instanceof (((_b = (_a = target.ownerDocument) === null || _a === void 0 ? void 0 : _a.defaultView) === null || _b === void 0 ? void 0 : _b.HTMLElement) || HTMLElement); })
+            .filter((entry) => getElementName(entry) === state.name)
+            .filter((entry) => matchesFocusState(entry, state));
+        if (matches.length === 1)
+            return matches[0];
+    }
+    const byPath = resolveNodePath(target, state.path);
+    if (byPath instanceof (((_c = (_b = target.ownerDocument) === null || _b === void 0 ? void 0 : _b.defaultView) === null || _c === void 0 ? void 0 : _c.HTMLElement) || HTMLElement) && byPath.tagName === state.tagName) {
+        return byPath;
+    }
+    return null;
+}
+function restoreSelectionState(element, selection) {
+    if (!selection)
+        return;
+    const target = element;
+    if (typeof target.setSelectionRange !== "function" || typeof target.value !== "string")
+        return;
+    const length = target.value.length;
+    const start = Math.max(0, Math.min(selection.start, length));
+    const end = Math.max(start, Math.min(selection.end, length));
+    try {
+        target.setSelectionRange(start, end, selection.direction || undefined);
+    }
+    catch (_error) {
+        target.setSelectionRange(start, end);
+    }
+}
+function restoreFocusState(target, state) {
+    if (!state)
+        return;
+    const candidate = findFocusCandidate(target, state);
+    if (!candidate || typeof candidate.focus !== "function")
+        return;
+    const apply = () => {
+        if (!candidate.isConnected)
+            return;
+        try {
+            candidate.focus({ preventScroll: true });
+        }
+        catch (_error) {
+            candidate.focus();
+        }
+        restoreSelectionState(candidate, state.selection);
+    };
+    apply();
+    const doc = target.ownerDocument || getDocument();
+    if ((doc === null || doc === void 0 ? void 0 : doc.activeElement) !== candidate) {
+        if (typeof queueMicrotask === "function") {
+            queueMicrotask(apply);
+        }
+        else {
+            Promise.resolve().then(apply).catch(() => undefined);
+        }
+    }
+}
 function resolveTarget(target) {
     if (typeof target === "string") {
         const found = documentOrThrow().querySelector(target);
@@ -1179,14 +1332,17 @@ function resolveTarget(target) {
     return target;
 }
 function replaceChildren(target, fragment) {
+    const focusState = captureFocusState(target);
     const maybeTarget = target;
     if (typeof maybeTarget.replaceChildren === "function") {
         maybeTarget.replaceChildren(fragment);
+        restoreFocusState(target, focusState);
         return;
     }
     while (target.firstChild)
         target.removeChild(target.firstChild);
     target.appendChild(fragment);
+    restoreFocusState(target, focusState);
 }
 function withViewTransition(update, enabled) {
     const doc = getDocument();
