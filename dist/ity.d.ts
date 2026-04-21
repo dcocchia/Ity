@@ -40,6 +40,7 @@ interface UnsafeHTML {
 type HTMLSanitizer = (value: string) => string;
 interface UnsafeHTMLOptions {
     sanitize?: HTMLSanitizer;
+    config?: ItyConfig | null;
 }
 interface ItyConfig {
     sanitizeHTML?: HTMLSanitizer | null;
@@ -47,6 +48,7 @@ interface ItyConfig {
 interface RenderOptions {
     reactive?: boolean;
     transition?: boolean;
+    config?: ItyConfig | null;
 }
 type StoreKey = string | symbol;
 interface StoreApi<T extends Record<StoreKey, any>> {
@@ -87,6 +89,9 @@ interface ActionOptions<TResult, E = unknown> {
 interface Action<TArgs extends unknown[], TResult, E = unknown> {
     (...args: TArgs): Promise<TResult>;
     submit(...args: TArgs): Promise<TResult>;
+    run(...args: TArgs): void;
+    with(...args: TArgs): (...eventArgs: unknown[]) => void;
+    from<TEvent = Event>(mapper: (event: TEvent) => TArgs): (event: TEvent) => void;
     readonly data: Signal<TResult | undefined>;
     readonly error: Signal<E | null>;
     readonly pending: ReadonlySignal<boolean>;
@@ -101,10 +106,67 @@ interface FormController<TResult, E = unknown> {
     readonly pending: ReadonlySignal<boolean>;
     readonly status: ReadonlySignal<AsyncStatus>;
     onSubmit(event: Event): Promise<TResult>;
+    handleSubmit(event: Event): void;
     reset(): void;
 }
 interface FormOptions<TResult, E = unknown> extends ActionOptions<TResult, E> {
     resetOnSuccess?: boolean;
+}
+type FormErrorMap<TValues extends Record<string, any>> = Partial<Record<Extract<keyof TValues, string>, string>>;
+interface FormBindOptions<T> {
+    type?: "text" | "textarea" | "select" | "select-multiple" | "checkbox" | "radio" | "number";
+    event?: string;
+    name?: string;
+    value?: unknown;
+    parse?: (value: unknown, event: Event) => T;
+    format?: (value: T) => unknown;
+}
+interface FormStateOptions<TValues extends Record<string, any>> {
+    validators?: Partial<{
+        [K in keyof TValues]: (value: TValues[K], values: TValues) => string | null | undefined;
+    }>;
+    validate?: (values: TValues) => FormErrorMap<TValues> | void;
+}
+interface FormField<T> {
+    readonly value: Signal<T>;
+    readonly error: ReadonlySignal<string | null>;
+    readonly touched: ReadonlySignal<boolean>;
+    readonly dirty: ReadonlySignal<boolean>;
+    bind(options?: FormBindOptions<T>): Record<string, unknown>;
+    set(next: T | ((previous: T) => T)): T;
+    reset(): void;
+}
+interface FormStateSubmitOptions<TResult, E = unknown> extends ActionOptions<TResult, E> {
+    resetOnSuccess?: boolean;
+}
+interface FormStateController<TValues extends Record<string, any>, TResult, E = unknown> {
+    readonly state: FormState<TValues>;
+    readonly action: Action<[TValues, Event], TResult, E>;
+    readonly data: Signal<TResult | undefined>;
+    readonly error: Signal<E | null>;
+    readonly pending: ReadonlySignal<boolean>;
+    readonly status: ReadonlySignal<AsyncStatus>;
+    onSubmit(event: Event): Promise<TResult | undefined>;
+    handleSubmit(event: Event): void;
+    reset(): void;
+}
+interface FormState<TValues extends Record<string, any>> {
+    readonly values: Store<TValues>;
+    readonly initialValues: ReadonlySignal<TValues>;
+    readonly errors: Store<FormErrorMap<TValues>>;
+    readonly touched: Store<Partial<Record<Extract<keyof TValues, string>, boolean>>>;
+    readonly dirty: ReadonlySignal<boolean>;
+    readonly valid: ReadonlySignal<boolean>;
+    field<K extends keyof TValues>(name: K): FormField<TValues[K]>;
+    bind<K extends keyof TValues>(name: K, options?: FormBindOptions<TValues[K]>): Record<string, unknown>;
+    set(next: Partial<TValues> | ((current: TValues) => Partial<TValues> | void)): void;
+    reset(next?: Partial<TValues> | TValues): void;
+    validate(names?: readonly (keyof TValues)[]): boolean;
+    markTouched(names?: readonly (keyof TValues)[]): void;
+    submit<TResult, E = unknown>(handler: (values: TValues, event: Event) => Promise<TResult> | TResult, options?: FormStateSubmitOptions<TResult, E>): FormStateController<TValues, TResult, E>;
+}
+interface RenderToStringOptions {
+    config?: ItyConfig | null;
 }
 declare function signal<T>(initialValue: T, options?: SignalOptions<T>): Signal<T>;
 declare function computed<T>(getter: () => T, options?: ComputedOptions<T>): ReadonlySignal<T>;
@@ -114,18 +176,21 @@ declare function untrack<T>(callback: () => T): T;
 declare function isSignal<T = unknown>(value: unknown): value is ReadonlySignal<T>;
 declare function resolveSignal<T>(value: MaybeSignal<T>): T;
 declare function configure(options?: ItyConfig): void;
+declare function createConfig(options?: ItyConfig): ItyConfig;
 declare function store<T extends Record<StoreKey, any>>(initialValue: T): Store<T>;
 declare function resource<T, E = unknown>(loader: (context: ResourceContext<T>) => Promise<T> | T, options?: ResourceOptions<T, E>): Resource<T, E>;
 declare function action<TArgs extends unknown[], TResult, E = unknown>(handler: (...args: TArgs) => Promise<TResult> | TResult, options?: ActionOptions<TResult, E>): Action<TArgs, TResult, E>;
 declare function form<TResult, E = unknown>(handler: (data: FormData, event: Event) => Promise<TResult> | TResult, options?: FormOptions<TResult, E>): FormController<TResult, E>;
+declare function formState<TValues extends Record<string, any>>(initialValue: TValues, options?: FormStateOptions<TValues>): FormState<TValues>;
 declare function html(strings: TemplateStringsArray | readonly string[], ...values: unknown[]): TemplateResult;
 declare function unsafeHTML(value: string, options?: UnsafeHTMLOptions): UnsafeHTML;
 declare function render(view: TemplateValue | (() => TemplateValue), target: string | Element | DocumentFragment | SelectorObject, options?: RenderOptions): Cleanup;
-declare function renderToString(view: TemplateValue | (() => TemplateValue)): string;
+declare function renderToString(view: TemplateValue | (() => TemplateValue), options?: RenderToStringOptions): string;
 interface ComponentContext {
     host: HTMLElement;
     root: HTMLElement | ShadowRoot;
     attr(name: string): ReadonlySignal<string | null>;
+    prop<T = unknown>(name: string): ReadonlySignal<T>;
     emit<T = unknown>(name: string, detail?: T, options?: CustomEventInit<T>): boolean;
     effect(callback: (onCleanup: (cleanup: Cleanup) => void) => void): EffectHandle;
     onConnected(callback: () => void): void;
@@ -136,8 +201,10 @@ type ComponentSetup = (ctx: ComponentContext) => ComponentRender | void;
 interface ComponentOptions {
     attrs?: string[];
     observedAttributes?: string[];
+    props?: string[];
     shadow?: boolean | ShadowRootMode | ShadowRootInit;
     styles?: string;
+    config?: ItyConfig | null;
     setup?: ComponentSetup;
 }
 declare function component(name: string, setupOrOptions: ComponentSetup | ComponentOptions, maybeOptions?: Omit<ComponentOptions, "setup">): CustomElementConstructor;
@@ -306,16 +373,21 @@ declare class Router {
         replace?: boolean;
         transition?: boolean;
     }): void;
+    href(path: string): string;
+    link(path: string, attrs?: Record<string, unknown>): Record<string, unknown>;
     start(): void;
     stop(): void;
     check(): RouteContext | null;
     private handleLinkClick;
     private handleNavigationEvent;
     private disposeRoute;
+    private resolveNavigationURL;
+    private findAnchor;
 }
 declare function route(pattern: string, handler: RouteHandler): Router;
 declare const Ity: {
     version: string;
+    createConfig: typeof createConfig;
     configure: typeof configure;
     signal: typeof signal;
     computed: typeof computed;
@@ -328,6 +400,7 @@ declare const Ity: {
     resource: typeof resource;
     action: typeof action;
     form: typeof form;
+    formState: typeof formState;
     html: typeof html;
     unsafeHTML: typeof unsafeHTML;
     render: typeof render;
@@ -343,5 +416,5 @@ declare const Ity: {
     Collection: typeof Collection;
 };
 
-export { Application, Collection, Model, Router, SelectorObject, View, action, batch, component, computed, configure, Ity as default, effect, form, html, isSignal, onDOMReady, render, renderToString, resolveSignal, resource, route, signal, store, unsafeHTML, untrack };
-export type { Action, ActionOptions, AsyncStatus, ComponentContext, ComponentOptions, EffectHandle, FormController, FormOptions, HTMLSanitizer, ItyConfig, ReadonlySignal, RenderOptions, Resource, ResourceContext, ResourceOptions, RouteContext, RouteHandler, Signal, Store, TemplateResult, UnsafeHTMLOptions };
+export { Application, Collection, Model, Router, SelectorObject, View, action, batch, component, computed, configure, createConfig, Ity as default, effect, form, formState, html, isSignal, onDOMReady, render, renderToString, resolveSignal, resource, route, signal, store, unsafeHTML, untrack };
+export type { Action, ActionOptions, AsyncStatus, ComponentContext, ComponentOptions, EffectHandle, FormBindOptions, FormController, FormField, FormOptions, FormState, FormStateController, FormStateOptions, FormStateSubmitOptions, HTMLSanitizer, ItyConfig, ReadonlySignal, RenderOptions, RenderToStringOptions, Resource, ResourceContext, ResourceOptions, RouteContext, RouteHandler, Signal, Store, TemplateResult, UnsafeHTMLOptions };

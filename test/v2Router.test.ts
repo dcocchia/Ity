@@ -53,8 +53,8 @@ describe('V2 router', function () {
     cleanup();
   });
 
-  it('delegates same-origin link clicks', function () {
-    const cleanup = setupDOM('<!DOCTYPE html><a data-ity-link href="/clicked">Click</a>');
+  it('delegates same-origin link clicks without requiring a custom data attribute', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><a href="/clicked">Click</a>');
     const router = new window.Ity.Router({ autoStart: false });
     let hit = false;
     router.add('/clicked', () => {
@@ -66,6 +66,42 @@ describe('V2 router', function () {
     anchor.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
 
     assert.equal(hit, true);
+    router.stop();
+    cleanup();
+  });
+
+  it('builds base-aware href values and intercepts links coming from shadow DOM', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><main id="root"></main>');
+    const tag = 'ity-v2-router-link-a';
+    const router = new window.Ity.Router({ autoStart: false, base: '/app' });
+    let hit = false;
+
+    window.Ity.component(tag, {
+      props: ['link'],
+      shadow: true,
+      setup(ctx: any) {
+        const link = ctx.prop('link');
+        return () => window.Ity.html`<a class="inside" bind=${link()}>Inside</a>`;
+      }
+    });
+
+    router.add('/tasks/:id', () => {
+      hit = true;
+    });
+    router.start();
+    window.Ity.render(() => window.Ity.html`
+      <ity-v2-router-link-a .link=${router.link('/tasks/42')}></ity-v2-router-link-a>
+    `, '#root');
+
+    const anchor = document.querySelector(tag)?.shadowRoot?.querySelector('.inside') as HTMLAnchorElement;
+    assert.strictEqual(anchor.getAttribute('href'), '/app/tasks/42');
+    anchor.click();
+
+    assert.strictEqual(hit, true);
+    assert.strictEqual(window.location.pathname, '/app/tasks/42');
+    const reportLink = router.link('/reports');
+    assert.strictEqual(reportLink.href, '/app/reports');
+    assert.strictEqual(typeof reportLink['@click'], 'function');
     router.stop();
     cleanup();
   });

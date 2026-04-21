@@ -1,6 +1,6 @@
 {
   "name": "ity",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "A tiny dependency-free reactive app kernel with MVC compatibility",
   "main": "dist/ity.cjs.js",
   "module": "dist/ity.esm.mjs",
@@ -36,7 +36,9 @@
     "pretest": "tsc -p tsconfig.json && cp build/Ity.js Ity.js",
     "precoverage": "tsc -p tsconfig.json && cp build/Ity.js Ity.js",
     "coverage": "jest --coverage",
-    "build": "tsc -p tsconfig.json && rollup -c",
+    "build": "tsc -p tsconfig.json && cp build/Ity.js Ity.js && rollup -c",
+    "examples:serve": "npm run build && node scripts/examples-server.mjs",
+    "examples:workbench": "npm run examples:serve",
     "test:dist": "ITY_FILE=../../dist/ity.min.js npm test -- --coverage=false"
   },
   "devDependencies": {
@@ -52,7 +54,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/dcocchia/Ity.git"
+    "url": "git+https://github.com/dcocchia/Ity.git"
   },
   "keywords": [
     "ity",

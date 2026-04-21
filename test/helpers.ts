@@ -12,7 +12,7 @@ if (!global.TextDecoder) {
 }
 ({ JSDOM } = require('jsdom'));
 
-export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') {
+export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>', url: string = 'https://example.com/') {
   const usingJest = !!process.env.JEST_WORKER_ID;
   let dom: any;
   let prevWindow: any;
@@ -28,8 +28,13 @@ export function setupDOM(html: string = '<!DOCTYPE html><div id="root"></div>') 
     global.document.open();
     global.document.write(html);
     global.document.close();
+    if (url) {
+      const nextUrl = new URL(url, global.window.location.href);
+      const safeUrl = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
+      global.window.history.replaceState(null, '', safeUrl);
+    }
   } else {
-    dom = new JSDOM(html);
+    dom = new JSDOM(html, { url });
     prevWindow = global.window;
     prevDocument = global.document;
     prevNodeList = global.NodeList;

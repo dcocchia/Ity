@@ -107,6 +107,45 @@ describe('V2 DOM templates and rendering', function () {
     cleanup();
   });
 
+  it('supports scoped render configs and bind attribute maps', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><main id="root"></main>');
+    const config = window.Ity.createConfig({
+      sanitizeHTML(value: string) {
+        return value.replace(/<script[\s\S]*?<\/script>/gi, '');
+      }
+    });
+    const clicks = window.Ity.signal(0);
+
+    window.Ity.render(() => window.Ity.html`
+      <button bind=${{
+        class: ['cta', clicks() > 0 && 'used'],
+        '@click': () => clicks.update((value: number) => value + 1)
+      }}>Go</button>
+      <article>${window.Ity.unsafeHTML('<b>ok</b><script>bad()</script>')}</article>
+    `, '#root', { reactive: false, config });
+
+    assert.strictEqual(document.querySelector('button')?.className, 'cta');
+    assert.strictEqual(document.querySelector('script'), null);
+    (document.querySelector('button') as HTMLButtonElement).click();
+    assert.strictEqual(clicks(), 1);
+
+    const scopedMarkup = window.Ity.renderToString(() => window.Ity.html`
+      <input bind=${{ name: 'title', '.value': 'Draft', '?disabled': true }}>
+      ${window.Ity.unsafeHTML('<i>safe</i><script>bad()</script>')}
+    `, { config });
+
+    assert(scopedMarkup.includes('name="title"'));
+    assert(scopedMarkup.includes('value="Draft"'));
+    assert(scopedMarkup.includes('disabled'));
+    assert(!scopedMarkup.includes('<script>'));
+
+    const globalMarkup = window.Ity.renderToString(() => window.Ity.html`
+      ${window.Ity.unsafeHTML('<i>safe</i><script>still-here()</script>')}
+    `);
+    assert(globalMarkup.includes('<script>still-here()</script>'));
+    cleanup();
+  });
+
   it('can render once without reactivity and render into a SelectorObject', function () {
     const cleanup = setupDOM('<!DOCTYPE html><main id="root"></main>');
     const count = window.Ity.signal(1);

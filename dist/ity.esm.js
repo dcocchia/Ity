@@ -3,6 +3,7 @@ let activeObserver = null;
 let batchDepth = 0;
 const pendingEffects = new Set();
 let configuredSanitizeHTML;
+const activeConfigStack = [];
 function getWindow() {
     return typeof window !== "undefined" ? window : undefined;
 }
@@ -10,6 +11,79 @@ function getDocument() {
     var _a;
     const win = getWindow();
     return (_a = win === null || win === void 0 ? void 0 : win.document) !== null && _a !== void 0 ? _a : (typeof document !== "undefined" ? document : undefined);
+}
+function hasOwn(target, key) {
+    return Object.prototype.hasOwnProperty.call(target, key);
+}
+function isPlainObject(value) {
+    if (!value || typeof value !== "object")
+        return false;
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+}
+function cloneValue(value) {
+    const cloneFn = globalThis.structuredClone;
+    if (typeof cloneFn === "function")
+        return cloneFn(value);
+    if (Array.isArray(value))
+        return value.map((item) => cloneValue(item));
+    if (isPlainObject(value)) {
+        const out = {};
+        for (const key of Reflect.ownKeys(value)) {
+            out[key] = cloneValue(value[key]);
+        }
+        return out;
+    }
+    return value;
+}
+function deepEqual(left, right) {
+    if (Object.is(left, right))
+        return true;
+    if (Array.isArray(left) && Array.isArray(right)) {
+        if (left.length !== right.length)
+            return false;
+        for (let i = 0; i < left.length; i += 1) {
+            if (!deepEqual(left[i], right[i]))
+                return false;
+        }
+        return true;
+    }
+    if (isPlainObject(left) && isPlainObject(right)) {
+        const leftKeys = Reflect.ownKeys(left);
+        const rightKeys = Reflect.ownKeys(right);
+        if (leftKeys.length !== rightKeys.length)
+            return false;
+        for (const key of leftKeys) {
+            if (!rightKeys.includes(key))
+                return false;
+            if (!deepEqual(left[key], right[key]))
+                return false;
+        }
+        return true;
+    }
+    return false;
+}
+function currentConfig() {
+    return activeConfigStack.length ? activeConfigStack[activeConfigStack.length - 1] : null;
+}
+function withConfig(config, callback) {
+    activeConfigStack.push(config || null);
+    try {
+        return callback();
+    }
+    finally {
+        activeConfigStack.pop();
+    }
+}
+function resolveSanitizeHTML(options = {}) {
+    var _a;
+    if (options.sanitize)
+        return options.sanitize;
+    const scoped = (_a = options.config) !== null && _a !== void 0 ? _a : currentConfig();
+    if (scoped && hasOwn(scoped, "sanitizeHTML")) {
+        return scoped.sanitizeHTML || undefined;
+    }
+    return configuredSanitizeHTML;
 }
 function trackDependency(source) {
     if (!activeObserver)
@@ -239,6 +313,13 @@ function resolveSignal(value) {
 }
 function configure(options = {}) {
     configuredSanitizeHTML = options.sanitizeHTML || undefined;
+}
+function createConfig(options = {}) {
+    var _a;
+    const config = {};
+    if (hasOwn(options, "sanitizeHTML"))
+        config.sanitizeHTML = (_a = options.sanitizeHTML) !== null && _a !== void 0 ? _a : null;
+    return config;
 }
 function store(initialValue) {
     const keys = new Set(Reflect.ownKeys(initialValue));
@@ -472,6 +553,19 @@ function action(handler, options = {}) {
     const callable = ((...args) => submit(...args));
     const mutableCallable = callable;
     mutableCallable.submit = submit;
+    mutableCallable.run = (...args) => {
+        submit(...args).catch(() => undefined);
+    };
+    mutableCallable.with = (...args) => {
+        return () => {
+            mutableCallable.run(...args);
+        };
+    };
+    mutableCallable.from = (mapper) => {
+        return (event) => {
+            mutableCallable.run(...mapper(event));
+        };
+    };
     mutableCallable.data = data;
     mutableCallable.error = error;
     mutableCallable.pending = pending;
@@ -486,40 +580,48 @@ function action(handler, options = {}) {
     };
     return callable;
 }
+function getFormElementCtor(node) {
+    var _a, _b;
+    const ownerWindow = (_a = node === null || node === void 0 ? void 0 : node.ownerDocument) === null || _a === void 0 ? void 0 : _a.defaultView;
+    return (ownerWindow === null || ownerWindow === void 0 ? void 0 : ownerWindow.HTMLFormElement)
+        || ((_b = getWindow()) === null || _b === void 0 ? void 0 : _b.HTMLFormElement)
+        || (typeof HTMLFormElement !== "undefined" ? HTMLFormElement : undefined);
+}
+function isFormElement(node, fallbackNode) {
+    const FormElement = node ? getFormElementCtor(node) : getFormElementCtor(fallbackNode || null);
+    return Boolean(node && FormElement && node instanceof FormElement);
+}
+function findFormElement(event) {
+    var _a;
+    const target = (event.currentTarget || event.target);
+    if (!getFormElementCtor(target))
+        throw new Error("Ity.form requires HTMLFormElement support");
+    if (isFormElement(target, target))
+        return target;
+    const closest = (_a = target === null || target === void 0 ? void 0 : target.closest) === null || _a === void 0 ? void 0 : _a.call(target, "form");
+    if (isFormElement(closest, target))
+        return closest;
+    throw new Error("Ity.form onSubmit requires a form event target");
+}
+function createFormDataForElement(formElement) {
+    var _a, _b;
+    const ownerWindow = (_a = formElement.ownerDocument) === null || _a === void 0 ? void 0 : _a.defaultView;
+    const FormDataCtor = (ownerWindow === null || ownerWindow === void 0 ? void 0 : ownerWindow.FormData)
+        || ((_b = getWindow()) === null || _b === void 0 ? void 0 : _b.FormData)
+        || (typeof FormData !== "undefined" ? FormData : undefined);
+    if (!FormDataCtor)
+        throw new Error("Ity.form requires FormData support");
+    return new FormDataCtor(formElement);
+}
 function form(handler, options = {}) {
     const submitAction = action(handler, options);
-    const findForm = (event) => {
-        var _a;
-        const target = (event.currentTarget || event.target);
-        const getFormElementCtor = (node) => {
-            var _a, _b;
-            const ownerWindow = (_a = node === null || node === void 0 ? void 0 : node.ownerDocument) === null || _a === void 0 ? void 0 : _a.defaultView;
-            return (ownerWindow === null || ownerWindow === void 0 ? void 0 : ownerWindow.HTMLFormElement)
-                || ((_b = getWindow()) === null || _b === void 0 ? void 0 : _b.HTMLFormElement)
-                || (typeof HTMLFormElement !== "undefined" ? HTMLFormElement : undefined);
-        };
-        const isFormElement = (node) => {
-            const FormElement = node ? getFormElementCtor(node) : getFormElementCtor(target);
-            return Boolean(node && FormElement && node instanceof FormElement);
-        };
-        if (!getFormElementCtor(target))
-            throw new Error("Ity.form requires HTMLFormElement support");
-        if (isFormElement(target))
-            return target;
-        const closest = (_a = target === null || target === void 0 ? void 0 : target.closest) === null || _a === void 0 ? void 0 : _a.call(target, "form");
-        if (isFormElement(closest))
-            return closest;
-        throw new Error("Ity.form onSubmit requires a form event target");
-    };
-    const createFormData = (formElement) => {
-        var _a, _b;
-        const ownerWindow = (_a = formElement.ownerDocument) === null || _a === void 0 ? void 0 : _a.defaultView;
-        const FormDataCtor = (ownerWindow === null || ownerWindow === void 0 ? void 0 : ownerWindow.FormData)
-            || ((_b = getWindow()) === null || _b === void 0 ? void 0 : _b.FormData)
-            || (typeof FormData !== "undefined" ? FormData : undefined);
-        if (!FormDataCtor)
-            throw new Error("Ity.form requires FormData support");
-        return new FormDataCtor(formElement);
+    const onSubmit = async (event) => {
+        event.preventDefault();
+        const formElement = findFormElement(event);
+        const result = await submitAction(createFormDataForElement(formElement), event);
+        if (options.resetOnSuccess)
+            formElement.reset();
+        return result;
     };
     return {
         action: submitAction,
@@ -527,18 +629,359 @@ function form(handler, options = {}) {
         error: submitAction.error,
         pending: submitAction.pending,
         status: submitAction.status,
-        async onSubmit(event) {
-            event.preventDefault();
-            const formElement = findForm(event);
-            const result = await submitAction(createFormData(formElement), event);
-            if (options.resetOnSuccess)
-                formElement.reset();
-            return result;
+        onSubmit,
+        handleSubmit(event) {
+            onSubmit(event).catch(() => undefined);
         },
         reset() {
             submitAction.reset();
         }
     };
+}
+function replaceStoreSnapshot(target, nextValue) {
+    const current = target.$snapshot();
+    batch(() => {
+        for (const key of Reflect.ownKeys(current)) {
+            if (!hasOwn(nextValue, key))
+                delete target[key];
+        }
+        for (const key of Reflect.ownKeys(nextValue)) {
+            target[key] = nextValue[key];
+        }
+    });
+}
+function formState(initialValue, options = {}) {
+    const values = store(cloneValue(initialValue));
+    const initialValues = signal(cloneValue(initialValue));
+    const errors = store({});
+    const touched = store({});
+    const registeredBindings = new Map();
+    const allFieldNames = () => {
+        const names = new Set();
+        Reflect.ownKeys(initialValues.peek()).forEach((key) => names.add(String(key)));
+        Reflect.ownKeys(values.$snapshot()).forEach((key) => names.add(String(key)));
+        return Array.from(names);
+    };
+    const computeErrors = (snapshot) => {
+        var _a;
+        const out = {};
+        const validators = options.validators || {};
+        for (const key of allFieldNames()) {
+            const validator = validators[key];
+            if (!validator)
+                continue;
+            const message = validator(snapshot[key], snapshot);
+            if (message)
+                out[key] = message;
+        }
+        const formErrors = (_a = options.validate) === null || _a === void 0 ? void 0 : _a.call(options, snapshot);
+        if (formErrors) {
+            for (const key of Reflect.ownKeys(formErrors)) {
+                const message = formErrors[key];
+                if (message)
+                    out[key] = message;
+            }
+        }
+        return out;
+    };
+    const syncErrors = () => {
+        const nextErrors = computeErrors(values.$snapshot());
+        replaceStoreSnapshot(errors, nextErrors);
+        return Reflect.ownKeys(nextErrors).length === 0;
+    };
+    const markTouched = (names) => {
+        const keys = (names === null || names === void 0 ? void 0 : names.length)
+            ? names.map((name) => String(name))
+            : allFieldNames();
+        batch(() => {
+            for (const key of keys) {
+                touched[key] = true;
+            }
+        });
+    };
+    const maybeValidateTouched = () => {
+        const touchedSnapshot = touched.$snapshot();
+        if (Reflect.ownKeys(touchedSnapshot).some((key) => Boolean(touchedSnapshot[key]))) {
+            syncErrors();
+        }
+    };
+    const set = (next) => {
+        values.$patch((current) => {
+            const patch = typeof next === "function" ? next(current) : next;
+            return patch || {};
+        });
+        maybeValidateTouched();
+    };
+    const reset = (next) => {
+        const base = cloneValue(next
+            ? { ...initialValues.peek(), ...next }
+            : initialValues.peek());
+        initialValues.set(cloneValue(base));
+        replaceStoreSnapshot(values, base);
+        replaceStoreSnapshot(errors, {});
+        replaceStoreSnapshot(touched, {});
+    };
+    const createFieldSignal = (name) => {
+        const signalLike = function (next) {
+            if (arguments.length === 0)
+                return values[name];
+            const previous = values[name];
+            const resolved = typeof next === "function"
+                ? next(previous)
+                : next;
+            values[name] = resolved;
+            maybeValidateTouched();
+            return resolved;
+        };
+        signalLike.get = () => values[name];
+        signalLike.peek = () => untrack(() => values[name]);
+        signalLike.set = (next) => signalLike(next);
+        signalLike.update = (updater) => signalLike(updater);
+        signalLike.subscribe = (callback, subscribeOptions = {}) => {
+            let first = true;
+            let previous = signalLike.peek();
+            return effect(() => {
+                const current = values[name];
+                if (first) {
+                    first = false;
+                    previous = current;
+                    if (subscribeOptions.immediate)
+                        callback(current, current);
+                    return;
+                }
+                if (!Object.is(previous, current)) {
+                    const prev = previous;
+                    previous = current;
+                    callback(current, prev);
+                }
+            });
+        };
+        Object.defineProperty(signalLike, "isSignal", { value: true });
+        return signalLike;
+    };
+    const registerBinding = (name, domName, type, bindOptions) => {
+        const fieldName = String(name);
+        const fieldBindings = registeredBindings.get(fieldName) || new Map();
+        const signature = `${domName}|${type}|${String(bindOptions.value)}`;
+        fieldBindings.set(signature, {
+            domName,
+            type,
+            value: bindOptions.value,
+            parse: bindOptions.parse
+        });
+        registeredBindings.set(fieldName, fieldBindings);
+    };
+    const syncFromForm = (event) => {
+        var _a;
+        const NO_FORM_VALUE = Symbol("ity.formState.noValue");
+        let formElement;
+        try {
+            formElement = findFormElement(event);
+        }
+        catch (_error) {
+            return;
+        }
+        const formData = createFormDataForElement(formElement);
+        const controls = Array.from(formElement.elements || []);
+        const patch = {};
+        const resolveControlValue = (name, bindings) => {
+            var _a, _b, _c;
+            const primary = bindings[0];
+            if (!primary)
+                return NO_FORM_VALUE;
+            const domName = primary.domName;
+            const namedControls = controls.filter((control) => control && control.name === domName);
+            if (primary.parse && namedControls.length) {
+                const parseTarget = primary.type === "radio"
+                    ? namedControls.find((control) => Boolean(control.checked)) || namedControls[0]
+                    : namedControls[0];
+                return primary.parse(parseTarget, event);
+            }
+            if (primary.type === "checkbox") {
+                const currentValue = values[name];
+                if (Array.isArray(currentValue) || bindings.some((binding) => binding.value !== undefined) || namedControls.length > 1) {
+                    const selected = [];
+                    for (const control of namedControls) {
+                        if (!control.checked)
+                            continue;
+                        const matched = bindings.find((binding) => { var _a, _b, _c; return String((_b = (_a = binding.value) !== null && _a !== void 0 ? _a : control.value) !== null && _b !== void 0 ? _b : "") === String((_c = control.value) !== null && _c !== void 0 ? _c : ""); });
+                        selected.push((_b = (_a = matched === null || matched === void 0 ? void 0 : matched.value) !== null && _a !== void 0 ? _a : control.value) !== null && _b !== void 0 ? _b : "");
+                    }
+                    return selected;
+                }
+                return formData.has(domName);
+            }
+            if (primary.type === "radio") {
+                return ((_c = formData.get(domName)) !== null && _c !== void 0 ? _c : values[name]);
+            }
+            if (primary.type === "select-multiple") {
+                const select = namedControls[0];
+                if (select === null || select === void 0 ? void 0 : select.selectedOptions) {
+                    return Array.from(select.selectedOptions).map((option) => option.value);
+                }
+                return formData.getAll(domName);
+            }
+            if (primary.type === "number") {
+                const raw = formData.get(domName);
+                return (raw === null || raw === "" ? undefined : Number(raw));
+            }
+            const raw = formData.get(domName);
+            return (raw === null ? "" : raw);
+        };
+        for (const fieldName of allFieldNames()) {
+            const bindings = Array.from(((_a = registeredBindings.get(fieldName)) === null || _a === void 0 ? void 0 : _a.values()) || []);
+            const nextValue = resolveControlValue(fieldName, bindings);
+            if (nextValue !== NO_FORM_VALUE) {
+                patch[fieldName] = nextValue;
+            }
+        }
+        if (Reflect.ownKeys(patch).length) {
+            values.$patch(() => patch);
+        }
+    };
+    const bind = (name, bindOptions = {}) => {
+        const field = api.field(name);
+        const type = bindOptions.type || "text";
+        const eventName = bindOptions.event
+            || (type === "checkbox" || type === "radio" || type === "select" || type === "select-multiple" ? "change" : "input");
+        const domName = bindOptions.name || String(name);
+        registerBinding(name, domName, type, bindOptions);
+        const formattedValue = bindOptions.format ? bindOptions.format(field.value()) : field.value();
+        const parseValue = (event) => {
+            var _a, _b;
+            if (bindOptions.parse) {
+                return bindOptions.parse((event.currentTarget || event.target), event);
+            }
+            const target = (event.currentTarget || event.target);
+            if (!target)
+                return field.value();
+            if (type === "checkbox") {
+                if (Array.isArray(field.value())) {
+                    const optionValue = (_a = bindOptions.value) !== null && _a !== void 0 ? _a : target.value;
+                    const current = field.value();
+                    return (target.checked
+                        ? Array.from(new Set([...current, optionValue]))
+                        : current.filter((item) => !Object.is(item, optionValue)));
+                }
+                return Boolean(target.checked);
+            }
+            if (type === "radio") {
+                if (!target.checked)
+                    return field.value();
+                return ((_b = bindOptions.value) !== null && _b !== void 0 ? _b : target.value);
+            }
+            if (type === "select-multiple") {
+                return Array.from(target.selectedOptions).map((option) => option.value);
+            }
+            if (type === "number") {
+                const raw = target.value;
+                return (raw === "" ? undefined : Number(raw));
+            }
+            return target.value;
+        };
+        const binding = {
+            name: domName,
+            [`@${eventName}`]: (event) => {
+                field.set(parseValue(event));
+            },
+            "@blur": () => {
+                markTouched([name]);
+                syncErrors();
+            }
+        };
+        if (type === "checkbox") {
+            if (Array.isArray(field.value())) {
+                const optionValue = bindOptions.value;
+                binding.value = optionValue === undefined ? "" : String(optionValue);
+                binding[".checked"] = computed(() => field.value().some((item) => Object.is(item, optionValue)));
+            }
+            else {
+                binding[".checked"] = computed(() => Boolean(field.value()));
+                binding.checked = Boolean(field.value());
+            }
+            return binding;
+        }
+        if (type === "radio") {
+            const optionValue = bindOptions.value;
+            binding.value = optionValue === undefined ? "" : String(optionValue);
+            binding[".checked"] = computed(() => Object.is(field.value(), optionValue));
+            return binding;
+        }
+        if (type === "select-multiple") {
+            binding[".value"] = formattedValue;
+            return binding;
+        }
+        const stringValue = formattedValue === undefined || formattedValue === null ? "" : String(formattedValue);
+        binding[".value"] = stringValue;
+        binding.value = stringValue;
+        return binding;
+    };
+    const api = {
+        values,
+        initialValues,
+        errors,
+        touched,
+        dirty: computed(() => !deepEqual(values.$snapshot(), initialValues())),
+        valid: computed(() => Reflect.ownKeys(errors.$snapshot()).length === 0),
+        field(name) {
+            const valueSignal = createFieldSignal(name);
+            return {
+                value: valueSignal,
+                error: computed(() => errors[name] || null),
+                touched: computed(() => Boolean(touched[name])),
+                dirty: computed(() => !deepEqual(values[name], initialValues()[name])),
+                bind(optionsForField) {
+                    return bind(name, optionsForField);
+                },
+                set(next) {
+                    return valueSignal.set(next);
+                },
+                reset() {
+                    valueSignal.set(initialValues.peek()[name]);
+                    delete errors[name];
+                    delete touched[name];
+                }
+            };
+        },
+        bind,
+        set,
+        reset,
+        validate() {
+            return syncErrors();
+        },
+        markTouched,
+        submit(handler, submitOptions = {}) {
+            const submitAction = action(handler, submitOptions);
+            const onSubmit = async (event) => {
+                event.preventDefault();
+                syncFromForm(event);
+                markTouched();
+                if (!syncErrors())
+                    return undefined;
+                const result = await submitAction(cloneValue(values.$snapshot()), event);
+                if (submitOptions.resetOnSuccess)
+                    api.reset();
+                return result;
+            };
+            return {
+                state: api,
+                action: submitAction,
+                data: submitAction.data,
+                error: submitAction.error,
+                pending: submitAction.pending,
+                status: submitAction.status,
+                onSubmit,
+                handleSubmit(event) {
+                    onSubmit(event).catch(() => undefined);
+                },
+                reset() {
+                    submitAction.reset();
+                    api.reset();
+                }
+            };
+        }
+    };
+    return api;
 }
 function html(strings, ...values) {
     return {
@@ -548,7 +991,7 @@ function html(strings, ...values) {
     };
 }
 function unsafeHTML(value, options = {}) {
-    const sanitizer = options.sanitize || configuredSanitizeHTML;
+    const sanitizer = resolveSanitizeHTML(options);
     return {
         isUnsafeHTML: true,
         value: sanitizer ? sanitizer(String(value)) : String(value)
@@ -602,6 +1045,12 @@ function appendValue(parent, value, doc) {
     }
     parent.appendChild(doc.createTextNode(String(value)));
 }
+function bindingFromName(rawName) {
+    const first = rawName[0];
+    const kind = first === "@" ? "event" : first === "." ? "prop" : first === "?" ? "bool" : "attr";
+    const name = kind === "attr" ? rawName : rawName.slice(1);
+    return { kind, name };
+}
 function materializeTemplate(result, doc = documentOrThrow()) {
     var _a, _b;
     const bindings = [];
@@ -613,9 +1062,7 @@ function materializeTemplate(result, doc = documentOrThrow()) {
             const rawName = attrMatch[1];
             const before = part.slice(0, part.length - attrMatch[0].length);
             const marker = `data-ity-bind-${i}`;
-            const first = rawName[0];
-            const kind = first === "@" ? "event" : first === "." ? "prop" : first === "?" ? "bool" : "attr";
-            const name = kind === "attr" ? rawName : rawName.slice(1);
+            const { kind, name } = bindingFromName(rawName);
             bindings.push({ index: i, kind, name });
             source += `${before}${marker}=""`;
         }
@@ -665,6 +1112,14 @@ function applyBindings(root, bindings, values, doc) {
 }
 function applyElementBinding(element, binding, value) {
     const name = binding.name || "";
+    if (binding.kind === "attr" && name === "bind" && isPlainObject(value)) {
+        for (const key of Reflect.ownKeys(value)) {
+            const entryValue = normalizeValue(value[key]);
+            const entry = bindingFromName(String(key));
+            applyElementBinding(element, { index: binding.index, ...entry }, entryValue);
+        }
+        return;
+    }
     if (binding.kind === "event") {
         if (typeof value === "function") {
             element.addEventListener(name, value);
@@ -675,6 +1130,13 @@ function applyElementBinding(element, binding, value) {
         return;
     }
     if (binding.kind === "prop") {
+        if (name === "value" && Array.isArray(value) && element.tagName === "SELECT" && element.multiple) {
+            const selectedValues = new Set(value.map((entry) => String(entry)));
+            Array.from(element.options).forEach((option) => {
+                option.selected = selectedValues.has(option.value);
+            });
+            return;
+        }
         element[name] = value;
         return;
     }
@@ -738,10 +1200,12 @@ function withViewTransition(update, enabled) {
 function render(view, target, options = {}) {
     const mount = resolveTarget(target);
     const update = () => {
-        const value = typeof view === "function" && !isSignal(view)
-            ? view()
-            : normalizeValue(view);
-        withViewTransition(() => replaceChildren(mount, valueToFragment(value)), options.transition);
+        withConfig(options.config, () => {
+            const value = typeof view === "function" && !isSignal(view)
+                ? view()
+                : normalizeValue(view);
+            withViewTransition(() => replaceChildren(mount, valueToFragment(value)), options.transition);
+        });
     };
     if (options.reactive === false) {
         update();
@@ -749,11 +1213,13 @@ function render(view, target, options = {}) {
     }
     return effect(update);
 }
-function renderToString(view) {
-    const value = typeof view === "function" && !isSignal(view)
-        ? view()
-        : normalizeValue(view);
-    return valueToString(value);
+function renderToString(view, options = {}) {
+    return withConfig(options.config, () => {
+        const value = typeof view === "function" && !isSignal(view)
+            ? view()
+            : normalizeValue(view);
+        return valueToString(value);
+    });
 }
 function valueToString(value) {
     value = normalizeValue(value);
@@ -783,9 +1249,34 @@ function templateToString(result) {
         if (attrMatch) {
             const rawName = attrMatch[1];
             const before = part.slice(0, part.length - attrMatch[0].length);
-            const first = rawName[0];
-            const kind = first === "@" ? "event" : first === "." ? "prop" : first === "?" ? "bool" : "attr";
-            const name = kind === "attr" ? rawName : rawName.slice(1);
+            const { kind, name } = bindingFromName(rawName);
+            if (kind === "attr" && name === "bind" && isPlainObject(value)) {
+                const serialized = [];
+                for (const key of Reflect.ownKeys(value)) {
+                    const entryValue = normalizeValue(value[key]);
+                    const entry = bindingFromName(String(key));
+                    const entryName = entry.name || "";
+                    if (entry.kind === "event" || entryValue === false || entryValue === null || entryValue === undefined)
+                        continue;
+                    if (entry.kind === "bool") {
+                        if (entryValue)
+                            serialized.push(entryName);
+                        continue;
+                    }
+                    if (entry.kind === "prop") {
+                        if (entryName === "value") {
+                            serialized.push(`value="${escapeAttribute(String(entryValue))}"`);
+                        }
+                        else if ((entryName === "checked" || entryName === "selected") && entryValue) {
+                            serialized.push(entryName);
+                        }
+                        continue;
+                    }
+                    serialized.push(`${entryName}="${escapeAttribute(stringifyAttribute(entryName, entryValue))}"`);
+                }
+                source += serialized.length ? `${before}${serialized.join(" ")}` : before;
+                continue;
+            }
             if (kind === "event" || kind === "prop" || value === false || value === null || value === undefined) {
                 source += before;
             }
@@ -793,7 +1284,7 @@ function templateToString(result) {
                 source += value ? `${before}${name}` : before;
             }
             else {
-                source += `${before}${name}="${escapeAttribute(stringifyAttribute(name, value))}"`;
+                source += `${before}${name || ""}="${escapeAttribute(stringifyAttribute(name || "", value))}"`;
             }
         }
         else {
@@ -839,10 +1330,12 @@ function component(name, setupOrOptions, maybeOptions = {}) {
         ? { ...maybeOptions, setup: setupOrOptions }
         : setupOrOptions;
     const attrs = definition.observedAttributes || definition.attrs || [];
+    const props = definition.props || [];
     class ItyElement extends win.HTMLElement {
         constructor() {
             super(...arguments);
             this.attrSignals = new Map();
+            this.propSignals = new Map();
             this.connectedCallbacks = [];
             this.disconnectedCallbacks = [];
             this.effectRecords = [];
@@ -855,6 +1348,8 @@ function component(name, setupOrOptions, maybeOptions = {}) {
         connectedCallback() {
             var _a;
             this.ensureMount();
+            for (const prop of props)
+                this.upgradeProperty(prop);
             if (!this.initialized) {
                 this.initialized = true;
                 const ctx = this.createContext();
@@ -916,7 +1411,10 @@ function component(name, setupOrOptions, maybeOptions = {}) {
         startRender() {
             if (this.renderCleanup || this.renderOutput === undefined)
                 return;
-            this.renderCleanup = render(this.renderOutput, this.renderTarget, { transition: false });
+            this.renderCleanup = render(this.renderOutput, this.renderTarget, {
+                transition: false,
+                config: definition.config
+            });
         }
         startEffects() {
             for (const record of this.effectRecords) {
@@ -931,11 +1429,25 @@ function component(name, setupOrOptions, maybeOptions = {}) {
             }
             return this.attrSignals.get(name);
         }
+        ensurePropSignal(name) {
+            if (!this.propSignals.has(name)) {
+                this.propSignals.set(name, signal(undefined));
+            }
+            return this.propSignals.get(name);
+        }
+        upgradeProperty(name) {
+            if (!hasOwn(this, name))
+                return;
+            const value = this[name];
+            delete this[name];
+            this[name] = value;
+        }
         createContext() {
             return {
                 host: this,
                 root: this.mount,
                 attr: (name) => this.ensureAttrSignal(name),
+                prop: (name) => this.ensurePropSignal(name),
                 emit: (name, detail, options = {}) => this.dispatchEvent(new CustomEvent(name, {
                     bubbles: true,
                     composed: true,
@@ -964,6 +1476,18 @@ function component(name, setupOrOptions, maybeOptions = {}) {
                 }
             };
         }
+    }
+    for (const prop of props) {
+        Object.defineProperty(ItyElement.prototype, prop, {
+            configurable: true,
+            enumerable: true,
+            get() {
+                return this.ensurePropSignal(prop).peek();
+            },
+            set(value) {
+                this.ensurePropSignal(prop).set(typeof value === "function" ? (() => value) : value);
+            }
+        });
     }
     win.customElements.define(name, ItyElement);
     return ItyElement;
@@ -1510,7 +2034,7 @@ class Router {
         this.navigationListener = (event) => this.handleNavigationEvent(event);
         this.current = signal(null);
         this.base = options.base || "/";
-        this.linkSelector = options.linkSelector || "a[data-ity-link]";
+        this.linkSelector = options.linkSelector || "a[href]";
         this.transition = Boolean(options.transition);
         this.notFound = options.notFound;
         if (options.autoStart !== false)
@@ -1544,6 +2068,29 @@ class Router {
             this.check();
         };
         withViewTransition(update, (_a = options.transition) !== null && _a !== void 0 ? _a : this.transition);
+    }
+    href(path) {
+        return withBasePath(path, this.base);
+    }
+    link(path, attrs = {}) {
+        const previousClick = attrs["@click"];
+        const href = this.href(path);
+        return {
+            ...attrs,
+            href,
+            "@click": (event) => {
+                previousClick === null || previousClick === void 0 ? void 0 : previousClick(event);
+                const currentTarget = event.currentTarget;
+                const anchor = currentTarget && typeof currentTarget.matches === "function" && currentTarget.matches(this.linkSelector)
+                    ? currentTarget
+                    : null;
+                const url = this.resolveNavigationURL(event, anchor, href);
+                if (!url)
+                    return;
+                event.preventDefault();
+                this.navigate(`${url.pathname}${url.search}${url.hash}`);
+            }
+        };
     }
     start() {
         var _a, _b;
@@ -1624,18 +2171,9 @@ class Router {
         return null;
     }
     handleLinkClick(event) {
-        var _a;
-        const target = event.target;
-        const anchor = (_a = target === null || target === void 0 ? void 0 : target.closest) === null || _a === void 0 ? void 0 : _a.call(target, this.linkSelector);
-        if (!anchor || anchor.target || anchor.hasAttribute("download"))
-            return;
-        const win = getWindow();
-        if (!win)
-            return;
-        const url = new URL(anchor.href, win.location.href);
-        if (url.origin !== win.location.origin)
-            return;
-        if (stripBasePath(url.pathname, this.base) === null)
+        const anchor = this.findAnchor(event);
+        const url = this.resolveNavigationURL(event, anchor);
+        if (!url)
             return;
         event.preventDefault();
         this.navigate(`${url.pathname}${url.search}${url.hash}`);
@@ -1662,6 +2200,45 @@ class Router {
         const cleanup = this.routeCleanup;
         this.routeCleanup = undefined;
         cleanup();
+    }
+    resolveNavigationURL(event, anchor, fallbackHref) {
+        var _a;
+        const mouseEvent = event;
+        if (event.defaultPrevented)
+            return null;
+        if (typeof mouseEvent.button === "number" && mouseEvent.button !== 0)
+            return null;
+        if (mouseEvent.metaKey || mouseEvent.ctrlKey || mouseEvent.shiftKey || mouseEvent.altKey)
+            return null;
+        if (anchor && ((anchor.target && anchor.target !== "_self") || anchor.hasAttribute("download")))
+            return null;
+        const win = getWindow();
+        if (!win)
+            return null;
+        const href = (_a = anchor === null || anchor === void 0 ? void 0 : anchor.getAttribute("href")) !== null && _a !== void 0 ? _a : fallbackHref;
+        if (!href || /^(mailto|tel):/i.test(href))
+            return null;
+        const url = new URL((anchor === null || anchor === void 0 ? void 0 : anchor.href) || href, win.location.href);
+        if (url.origin !== win.location.origin)
+            return null;
+        if (stripBasePath(url.pathname, this.base) === null)
+            return null;
+        return url;
+    }
+    findAnchor(event) {
+        var _a;
+        const fromPath = typeof event.composedPath === "function"
+            ? event.composedPath()
+            : [];
+        for (const entry of fromPath) {
+            if (!entry || !entry.matches)
+                continue;
+            const element = entry;
+            if (element.matches(this.linkSelector))
+                return element;
+        }
+        const target = event.target;
+        return (_a = target === null || target === void 0 ? void 0 : target.closest) === null || _a === void 0 ? void 0 : _a.call(target, this.linkSelector);
     }
 }
 function createRouteRecord(pattern, handler) {
@@ -1780,7 +2357,8 @@ function route(pattern, handler) {
     return router;
 }
 const Ity = {
-    version: "2.1.0",
+    version: "2.2.0",
+    createConfig,
     configure,
     signal,
     computed,
@@ -1793,6 +2371,7 @@ const Ity = {
     resource,
     action,
     form,
+    formState,
     html,
     unsafeHTML,
     render,
@@ -1825,5 +2404,5 @@ if (win) {
     win.Ity = Ity;
 }
 
-export { Application, Collection, Model, Router, SelectorObject, View, action, batch, component, computed, configure, Ity as default, effect, form, html, isSignal, onDOMReady, render, renderToString, resolveSignal, resource, route, signal, store, unsafeHTML, untrack };
+export { Application, Collection, Model, Router, SelectorObject, View, action, batch, component, computed, configure, createConfig, Ity as default, effect, form, formState, html, isSignal, onDOMReady, render, renderToString, resolveSignal, resource, route, signal, store, unsafeHTML, untrack };
 //# sourceMappingURL=ity.esm.js.map
