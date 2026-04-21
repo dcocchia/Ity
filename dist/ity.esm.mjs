@@ -3,7 +3,118 @@ let activeObserver = null;
 let batchDepth = 0;
 const pendingEffects = new Set();
 let configuredSanitizeHTML;
+let configuredWarningHandler;
 const activeConfigStack = [];
+const runtimeObservers = new Set();
+const renderScopeByTarget = new WeakMap();
+let scopeId = 0;
+let runtimeDispatchDepth = 0;
+function emitRuntimeEvent(event) {
+    if (runtimeDispatchDepth > 0 || runtimeObservers.size === 0)
+        return;
+    runtimeDispatchDepth += 1;
+    try {
+        for (const observer of Array.from(runtimeObservers)) {
+            observer(event);
+        }
+    }
+    finally {
+        runtimeDispatchDepth -= 1;
+    }
+}
+function observeRuntime(observer) {
+    runtimeObservers.add(observer);
+    return () => {
+        runtimeObservers.delete(observer);
+    };
+}
+function warnRuntime(code, message, detail) {
+    var _a;
+    const warning = { code, message, detail };
+    const handler = ((_a = currentConfig()) === null || _a === void 0 ? void 0 : _a.onWarning) || configuredWarningHandler;
+    handler === null || handler === void 0 ? void 0 : handler(warning);
+    emitRuntimeEvent({
+        type: "warning",
+        timestamp: Date.now(),
+        name: code,
+        detail: warning
+    });
+}
+class ScopeNode {
+    constructor(options = {}) {
+        var _a;
+        this.entries = new Map();
+        this.parent = options.parent || null;
+        this.name = options.name || `scope:${++scopeId}`;
+        this.structure = signal(0, { name: `${(_a = this.name) !== null && _a !== void 0 ? _a : "scope"}.structure` });
+    }
+    bumpStructure() {
+        this.structure.update((value) => value + 1);
+    }
+    readSignalValue(key, fallback) {
+        this.structure();
+        if (this.entries.has(key))
+            return this.entries.get(key)();
+        if (this.parent instanceof ScopeNode)
+            return this.parent.readSignalValue(key, fallback);
+        if (this.parent)
+            return this.parent.signal(key, fallback)();
+        return fallback;
+    }
+    provide(key, value) {
+        var _a;
+        const existing = this.entries.get(key);
+        if (existing) {
+            existing.set(value);
+            return existing;
+        }
+        const entry = signal(value, { name: `${(_a = this.name) !== null && _a !== void 0 ? _a : "scope"}.${String(key)}` });
+        this.entries.set(key, entry);
+        this.bumpStructure();
+        emitRuntimeEvent({
+            type: "scope:provide",
+            timestamp: Date.now(),
+            name: this.name || undefined,
+            detail: { key: String(key), value }
+        });
+        return entry;
+    }
+    set(key, value) {
+        this.provide(key, value);
+        return value;
+    }
+    get(key, fallback) {
+        if (this.entries.has(key))
+            return this.entries.get(key)();
+        if (this.parent)
+            return this.parent.get(key, fallback);
+        return fallback;
+    }
+    signal(key, fallback) {
+        return computed(() => {
+            return this.readSignalValue(key, fallback);
+        });
+    }
+    has(key) {
+        var _a;
+        return this.entries.has(key) || Boolean((_a = this.parent) === null || _a === void 0 ? void 0 : _a.has(key));
+    }
+    delete(key) {
+        if (!this.entries.has(key))
+            return;
+        this.entries.delete(key);
+        this.bumpStructure();
+        emitRuntimeEvent({
+            type: "scope:delete",
+            timestamp: Date.now(),
+            name: this.name || undefined,
+            detail: { key: String(key) }
+        });
+    }
+}
+function createScope(options = {}) {
+    return new ScopeNode(options);
+}
 function getWindow() {
     return typeof window !== "undefined" ? window : undefined;
 }
@@ -123,6 +234,7 @@ class SignalNode {
         this.subscribers = new Set();
         this.value = value;
         this.equals = options.equals || defaultEquals;
+        this.name = options.name;
     }
     read(track = true) {
         if (track)
@@ -137,6 +249,12 @@ class SignalNode {
         if (this.equals(previous, resolved))
             return previous;
         this.value = resolved;
+        emitRuntimeEvent({
+            type: "signal:set",
+            timestamp: Date.now(),
+            name: this.name,
+            detail: { previous, value: resolved }
+        });
         notifyObservers(this);
         for (const subscriber of Array.from(this.subscribers)) {
             subscriber(resolved, previous);
@@ -162,6 +280,7 @@ class ComputedNode {
         this.dirty = true;
         this.initialized = false;
         this.equals = options.equals || defaultEquals;
+        this.name = options.name;
     }
     read(track = true) {
         if (track)
@@ -203,6 +322,11 @@ class ComputedNode {
             this.value = this.getter();
             this.dirty = false;
             this.initialized = true;
+            emitRuntimeEvent({
+                type: "computed:evaluate",
+                timestamp: Date.now(),
+                name: this.name
+            });
         }
         finally {
             activeObserver = previousObserver;
@@ -313,12 +437,15 @@ function resolveSignal(value) {
 }
 function configure(options = {}) {
     configuredSanitizeHTML = options.sanitizeHTML || undefined;
+    configuredWarningHandler = options.onWarning || undefined;
 }
 function createConfig(options = {}) {
-    var _a;
+    var _a, _b;
     const config = {};
     if (hasOwn(options, "sanitizeHTML"))
         config.sanitizeHTML = (_a = options.sanitizeHTML) !== null && _a !== void 0 ? _a : null;
+    if (hasOwn(options, "onWarning"))
+        config.onWarning = (_b = options.onWarning) !== null && _b !== void 0 ? _b : null;
     return config;
 }
 function store(initialValue) {
@@ -447,6 +574,12 @@ function resource(loader, options = {}) {
             pending.set(true);
             statusValue.set("loading");
             error.set(null);
+            emitRuntimeEvent({
+                type: "resource:refresh",
+                timestamp: Date.now(),
+                name: options.name,
+                detail: { refreshId: id }
+            });
             if (!keepPrevious)
                 data.set(undefined);
             currentPromise = Promise.resolve()
@@ -458,6 +591,12 @@ function resource(loader, options = {}) {
                 data.set(value);
                 error.set(null);
                 statusValue.set("success");
+                emitRuntimeEvent({
+                    type: "resource:success",
+                    timestamp: Date.now(),
+                    name: options.name,
+                    detail: { refreshId: id, value }
+                });
                 (_a = options.onSuccess) === null || _a === void 0 ? void 0 : _a.call(options, value);
                 return value;
             })
@@ -467,6 +606,12 @@ function resource(loader, options = {}) {
                     return data.peek();
                 error.set(err);
                 statusValue.set("error");
+                emitRuntimeEvent({
+                    type: "resource:error",
+                    timestamp: Date.now(),
+                    name: options.name,
+                    detail: { refreshId: id, error: err }
+                });
                 (_a = options.onError) === null || _a === void 0 ? void 0 : _a.call(options, err);
                 return data.peek();
             })
@@ -488,6 +633,12 @@ function resource(loader, options = {}) {
             error.set(null);
             pending.set(false);
             statusValue.set(value === undefined ? "idle" : "success");
+            emitRuntimeEvent({
+                type: "resource:mutate",
+                timestamp: Date.now(),
+                name: options.name,
+                detail: { value }
+            });
         },
         abort(reason) {
             if (!controller)
@@ -498,6 +649,12 @@ function resource(loader, options = {}) {
             currentPromise = null;
             pending.set(false);
             statusValue.set(data.peek() === undefined ? "idle" : "success");
+            emitRuntimeEvent({
+                type: "resource:abort",
+                timestamp: Date.now(),
+                name: options.name,
+                detail: { reason }
+            });
         }
     };
     if (options.immediate !== false) {
@@ -519,6 +676,12 @@ function action(handler, options = {}) {
         count.update((value) => value + 1);
         statusValue.set("loading");
         error.set(null);
+        emitRuntimeEvent({
+            type: "action:start",
+            timestamp: Date.now(),
+            name: options.name,
+            detail: { args }
+        });
         return Promise.resolve()
             .then(() => handler(...args))
             .then((value) => {
@@ -526,6 +689,12 @@ function action(handler, options = {}) {
             if (runGeneration === generation) {
                 data.set(value);
                 error.set(null);
+                emitRuntimeEvent({
+                    type: "action:success",
+                    timestamp: Date.now(),
+                    name: options.name,
+                    detail: { args, value }
+                });
                 (_a = options.onSuccess) === null || _a === void 0 ? void 0 : _a.call(options, value);
                 if (count.peek() <= 1)
                     statusValue.set("success");
@@ -536,6 +705,12 @@ function action(handler, options = {}) {
             var _a;
             if (runGeneration === generation) {
                 error.set(err);
+                emitRuntimeEvent({
+                    type: "action:error",
+                    timestamp: Date.now(),
+                    name: options.name,
+                    detail: { args, error: err }
+                });
                 (_a = options.onError) === null || _a === void 0 ? void 0 : _a.call(options, err);
                 if (count.peek() <= 1)
                     statusValue.set("error");
@@ -577,6 +752,11 @@ function action(handler, options = {}) {
         error.set(null);
         count.set(0);
         statusValue.set("idle");
+        emitRuntimeEvent({
+            type: "action:reset",
+            timestamp: Date.now(),
+            name: options.name
+        });
     };
     return callable;
 }
@@ -1015,10 +1195,61 @@ function documentOrThrow() {
 function normalizeValue(value) {
     return isSignal(value) ? value() : value;
 }
+function isRepeatResult(value) {
+    return !!value && typeof value === "object" && value.isRepeatResult === true;
+}
+function repeat(items, key, renderItem) {
+    const resolvedItems = typeof items === "function"
+        ? items()
+        : resolveSignal(items);
+    const values = Array.from(resolvedItems || []).map((item, index) => ({
+        __ityRepeatKey: String(key(item, index)),
+        __ityRepeatValue: renderItem(item, index)
+    }));
+    const keys = new Set();
+    for (const entry of values) {
+        if (keys.has(entry.__ityRepeatKey)) {
+            warnRuntime("repeat-duplicate-key", `Ity.repeat encountered a duplicate key "${entry.__ityRepeatKey}".`, {
+                key: entry.__ityRepeatKey
+            });
+        }
+        keys.add(entry.__ityRepeatKey);
+    }
+    return {
+        isRepeatResult: true,
+        values
+    };
+}
 function valueToFragment(value, doc = documentOrThrow()) {
     const fragment = doc.createDocumentFragment();
     appendValue(fragment, normalizeValue(value), doc);
     return fragment;
+}
+function applyRepeatKey(node, key) {
+    if (node.nodeType === 1) {
+        node.__ityKey = key;
+    }
+}
+function appendRepeatValue(parent, entry, doc) {
+    const fragment = valueToFragment(entry.__ityRepeatValue, doc);
+    const nodes = Array.from(fragment.childNodes).filter((node) => {
+        return node.nodeType !== 3 || Boolean(node.textContent && node.textContent.trim());
+    });
+    if (nodes.length === 0)
+        return;
+    if (nodes.length > 1) {
+        throw new Error("Ity.repeat items must render exactly one root node.");
+    }
+    const node = nodes[0];
+    if (fragment.firstChild !== node) {
+        fragment.textContent = "";
+        fragment.appendChild(node);
+    }
+    if (node.nodeType !== 1) {
+        throw new Error("Ity.repeat items must render an element root node.");
+    }
+    applyRepeatKey(node, entry.__ityRepeatKey);
+    parent.appendChild(fragment);
 }
 function appendValue(parent, value, doc) {
     value = normalizeValue(value);
@@ -1027,6 +1258,12 @@ function appendValue(parent, value, doc) {
     if (Array.isArray(value)) {
         for (const item of value)
             appendValue(parent, item, doc);
+        return;
+    }
+    if (isRepeatResult(value)) {
+        for (const entry of value.values) {
+            appendRepeatValue(parent, entry, doc);
+        }
         return;
     }
     if (isTemplateResult(value)) {
@@ -1050,6 +1287,68 @@ function bindingFromName(rawName) {
     const kind = first === "@" ? "event" : first === "." ? "prop" : first === "?" ? "bool" : "attr";
     const name = kind === "attr" ? rawName : rawName.slice(1);
     return { kind, name };
+}
+function readManagedBindingMeta(element) {
+    return element.__ityBindings || null;
+}
+function setManagedBindingMeta(element, meta) {
+    element.__ityBindings = meta;
+}
+function ensureManagedBindingMeta(element) {
+    const existing = readManagedBindingMeta(element);
+    if (existing)
+        return existing;
+    const meta = {
+        events: new Map(),
+        props: new Map()
+    };
+    setManagedBindingMeta(element, meta);
+    return meta;
+}
+function setElementKey(element, key) {
+    if (key === null || key === undefined) {
+        delete element.__ityKey;
+        element.removeAttribute("data-ity-key");
+        return;
+    }
+    element.__ityKey = key;
+    element.setAttribute("data-ity-key", key);
+}
+function getNodeKey(node) {
+    if (!node || node.nodeType !== 1)
+        return null;
+    const element = node;
+    const stored = element.__ityKey;
+    if (typeof stored === "string" && stored)
+        return stored;
+    const attr = element.getAttribute("data-ity-key");
+    return attr || null;
+}
+function applyEventBinding(element, name, value) {
+    const records = [];
+    if (typeof value === "function") {
+        const record = { listener: value };
+        element.addEventListener(name, record.listener);
+        records.push(record);
+    }
+    else if (Array.isArray(value) && typeof value[0] === "function") {
+        const record = { listener: value[0], options: value[1] };
+        element.addEventListener(name, record.listener, record.options);
+        records.push(record);
+    }
+    ensureManagedBindingMeta(element).events.set(name, records);
+}
+function applyPropertyBinding(element, name, value) {
+    if (name === "value" && Array.isArray(value) && element.tagName === "SELECT" && element.multiple) {
+        const selectedValues = new Set(value.map((entry) => String(entry)));
+        Array.from(element.options).forEach((option) => {
+            option.selected = selectedValues.has(option.value);
+        });
+    }
+    else {
+        element[name] = value;
+    }
+    ensureManagedBindingMeta(element).props.set(name, value);
 }
 function materializeTemplate(result, doc = documentOrThrow()) {
     var _a, _b;
@@ -1121,23 +1420,11 @@ function applyElementBinding(element, binding, value) {
         return;
     }
     if (binding.kind === "event") {
-        if (typeof value === "function") {
-            element.addEventListener(name, value);
-        }
-        else if (Array.isArray(value) && typeof value[0] === "function") {
-            element.addEventListener(name, value[0], value[1]);
-        }
+        applyEventBinding(element, name, value);
         return;
     }
     if (binding.kind === "prop") {
-        if (name === "value" && Array.isArray(value) && element.tagName === "SELECT" && element.multiple) {
-            const selectedValues = new Set(value.map((entry) => String(entry)));
-            Array.from(element.options).forEach((option) => {
-                option.selected = selectedValues.has(option.value);
-            });
-            return;
-        }
-        element[name] = value;
+        applyPropertyBinding(element, name, value);
         return;
     }
     if (binding.kind === "bool") {
@@ -1145,7 +1432,13 @@ function applyElementBinding(element, binding, value) {
         return;
     }
     if (value === false || value === null || value === undefined) {
+        if (name === "key")
+            setElementKey(element, null);
         element.removeAttribute(name);
+        return;
+    }
+    if (name === "key") {
+        setElementKey(element, String(value));
         return;
     }
     if (name === "class" && Array.isArray(value)) {
@@ -1316,6 +1609,192 @@ function restoreFocusState(target, state) {
         }
     }
 }
+function cleanupManagedBindings(element) {
+    const meta = readManagedBindingMeta(element);
+    if (!meta)
+        return;
+    for (const [eventName, records] of meta.events) {
+        for (const record of records) {
+            element.removeEventListener(eventName, record.listener, record.options);
+        }
+    }
+    meta.events.clear();
+    meta.props.clear();
+    delete element.__ityBindings;
+}
+function cleanupManagedSubtree(node) {
+    var _a;
+    if (node.nodeType === 1) {
+        cleanupManagedBindings(node);
+        const walker = (_a = (node.ownerDocument || getDocument())) === null || _a === void 0 ? void 0 : _a.createTreeWalker(node, 1);
+        let current = (walker === null || walker === void 0 ? void 0 : walker.nextNode()) || null;
+        while (current) {
+            cleanupManagedBindings(current);
+            current = walker.nextNode();
+        }
+    }
+}
+function syncManagedBindings(current, next) {
+    const currentMeta = readManagedBindingMeta(current);
+    if (currentMeta) {
+        for (const [eventName, records] of currentMeta.events) {
+            for (const record of records) {
+                current.removeEventListener(eventName, record.listener, record.options);
+            }
+        }
+    }
+    const nextMeta = readManagedBindingMeta(next);
+    const synced = {
+        events: new Map(),
+        props: new Map()
+    };
+    const previousPropNames = new Set(currentMeta ? Array.from(currentMeta.props.keys()) : []);
+    if (nextMeta) {
+        for (const [eventName, records] of nextMeta.events) {
+            const applied = records.map((record) => ({ ...record }));
+            for (const record of applied) {
+                current.addEventListener(eventName, record.listener, record.options);
+            }
+            synced.events.set(eventName, applied);
+        }
+        for (const [propName, propValue] of nextMeta.props) {
+            applyPropertyBinding(current, propName, propValue);
+            synced.props.set(propName, propValue);
+            previousPropNames.delete(propName);
+        }
+    }
+    for (const propName of previousPropNames) {
+        try {
+            current[propName] = undefined;
+        }
+        catch (_error) {
+            // Ignore non-writable host properties.
+        }
+    }
+    setManagedBindingMeta(current, synced);
+    setElementKey(current, getNodeKey(next));
+}
+function syncAttributes(current, next) {
+    const currentAttrs = new Map();
+    Array.from(current.attributes).forEach((attr) => currentAttrs.set(attr.name, attr.value));
+    const nextAttrs = new Map();
+    Array.from(next.attributes).forEach((attr) => nextAttrs.set(attr.name, attr.value));
+    for (const name of Array.from(currentAttrs.keys())) {
+        if (!nextAttrs.has(name))
+            current.removeAttribute(name);
+    }
+    for (const [name, value] of nextAttrs) {
+        if (current.getAttribute(name) !== value) {
+            current.setAttribute(name, value);
+        }
+    }
+}
+function canMorphNode(current, next) {
+    if (current.nodeType !== next.nodeType)
+        return false;
+    if (current.nodeType === 1) {
+        const currentElement = current;
+        const nextElement = next;
+        const currentKey = getNodeKey(currentElement);
+        const nextKey = getNodeKey(nextElement);
+        if (currentKey !== nextKey)
+            return false;
+        return currentElement.tagName === nextElement.tagName;
+    }
+    return true;
+}
+function findCompatibleUnkeyedNode(oldNodes, used, next, fromIndex) {
+    for (let i = fromIndex; i < oldNodes.length; i += 1) {
+        const candidate = oldNodes[i];
+        if (used.has(candidate) || getNodeKey(candidate) !== null)
+            continue;
+        if (canMorphNode(candidate, next)) {
+            return { node: candidate, nextIndex: i + 1 };
+        }
+    }
+    for (let i = 0; i < fromIndex; i += 1) {
+        const candidate = oldNodes[i];
+        if (used.has(candidate) || getNodeKey(candidate) !== null)
+            continue;
+        if (canMorphNode(candidate, next)) {
+            return { node: candidate, nextIndex: fromIndex };
+        }
+    }
+    return { node: null, nextIndex: fromIndex };
+}
+function createKeyMap(nodes) {
+    const map = new Map();
+    for (const node of nodes) {
+        const key = getNodeKey(node);
+        if (!key)
+            continue;
+        if (map.has(key)) {
+            warnRuntime("duplicate-key", `Ity encountered duplicate DOM keys for "${key}" during reconciliation.`, { key });
+            continue;
+        }
+        map.set(key, node);
+    }
+    return map;
+}
+function morphNode(current, next) {
+    if (!canMorphNode(current, next)) {
+        cleanupManagedSubtree(current);
+        if (current.parentNode)
+            current.parentNode.replaceChild(next, current);
+        return;
+    }
+    if (current.nodeType === 3 || current.nodeType === 8) {
+        if (current.data !== next.data) {
+            current.data = next.data;
+        }
+        return;
+    }
+    const currentElement = current;
+    const nextElement = next;
+    syncAttributes(currentElement, nextElement);
+    syncManagedBindings(currentElement, nextElement);
+    morphChildNodes(currentElement, nextElement);
+}
+function morphChildNodes(currentParent, nextParent) {
+    const oldNodes = Array.from(currentParent.childNodes);
+    const newNodes = Array.from(nextParent.childNodes);
+    const used = new Set();
+    const keyed = createKeyMap(oldNodes);
+    let searchIndex = 0;
+    let referenceNode = currentParent.firstChild;
+    for (const next of newNodes) {
+        const key = getNodeKey(next);
+        let matched = null;
+        if (key !== null) {
+            matched = keyed.get(key) || null;
+        }
+        else {
+            const result = findCompatibleUnkeyedNode(oldNodes, used, next, searchIndex);
+            matched = result.node;
+            searchIndex = result.nextIndex;
+        }
+        if (matched && used.has(matched)) {
+            matched = null;
+        }
+        if (matched) {
+            used.add(matched);
+            morphNode(matched, next);
+            if (matched !== referenceNode)
+                currentParent.insertBefore(matched, referenceNode);
+            referenceNode = matched.nextSibling;
+        }
+        else {
+            currentParent.insertBefore(next, referenceNode);
+            referenceNode = next.nextSibling;
+        }
+    }
+    for (const oldNode of oldNodes) {
+        if (!used.has(oldNode)) {
+            cleanupManagedSubtree(oldNode);
+            oldNode.remove();
+        }
+    }
+}
 function resolveTarget(target) {
     if (typeof target === "string") {
         const found = documentOrThrow().querySelector(target);
@@ -1331,17 +1810,24 @@ function resolveTarget(target) {
     }
     return target;
 }
-function replaceChildren(target, fragment) {
+function replaceChildren(target, fragment, options = {}) {
     const focusState = captureFocusState(target);
-    const maybeTarget = target;
-    if (typeof maybeTarget.replaceChildren === "function") {
-        maybeTarget.replaceChildren(fragment);
+    if (options.mode === "replace") {
+        const maybeTarget = target;
+        if (typeof maybeTarget.replaceChildren === "function") {
+            maybeTarget.replaceChildren(fragment);
+            restoreFocusState(target, focusState);
+            return;
+        }
+        while (target.firstChild) {
+            cleanupManagedSubtree(target.firstChild);
+            target.removeChild(target.firstChild);
+        }
+        target.appendChild(fragment);
         restoreFocusState(target, focusState);
         return;
     }
-    while (target.firstChild)
-        target.removeChild(target.firstChild);
-    target.appendChild(fragment);
+    morphChildNodes(target, fragment);
     restoreFocusState(target, focusState);
 }
 function withViewTransition(update, enabled) {
@@ -1355,12 +1841,18 @@ function withViewTransition(update, enabled) {
 }
 function render(view, target, options = {}) {
     const mount = resolveTarget(target);
+    const scope = options.scope || renderScopeByTarget.get(mount) || new ScopeNode({ parent: null, name: "render" });
+    renderScopeByTarget.set(mount, scope);
     const update = () => {
         withConfig(options.config, () => {
             const value = typeof view === "function" && !isSignal(view)
                 ? view()
                 : normalizeValue(view);
-            withViewTransition(() => replaceChildren(mount, valueToFragment(value)), options.transition);
+            withViewTransition(() => replaceChildren(mount, valueToFragment(value), {
+                ...options,
+                mode: options.mode || "morph",
+                scope
+            }), options.transition);
         });
     };
     if (options.reactive === false) {
@@ -1368,6 +1860,13 @@ function render(view, target, options = {}) {
         return () => undefined;
     }
     return effect(update);
+}
+function hydrate(view, target, options = {}) {
+    return render(view, target, {
+        ...options,
+        mode: "morph",
+        warnOnMismatch: options.warnOnMismatch !== false
+    });
 }
 function renderToString(view, options = {}) {
     return withConfig(options.config, () => {
@@ -1383,6 +1882,11 @@ function valueToString(value) {
         return "";
     if (Array.isArray(value))
         return value.map(valueToString).join("");
+    if (isRepeatResult(value)) {
+        return value.values
+            .map((entry) => valueToStringWithKey(entry.__ityRepeatValue, entry.__ityRepeatKey))
+            .join("");
+    }
     if (isTemplateResult(value))
         return templateToString(value);
     if (isUnsafeHTML(value))
@@ -1394,6 +1898,15 @@ function valueToString(value) {
         return escapeHTML(node.textContent || "");
     }
     return escapeHTML(String(value));
+}
+function valueToStringWithKey(value, key) {
+    const rendered = valueToString(value);
+    if (!rendered)
+        return "";
+    if (!rendered.startsWith("<")) {
+        throw new Error("Ity.repeat items must render an element root node.");
+    }
+    return rendered.replace(/^<([A-Za-z][^\s/>]*)(\s|>)/, `<$1 data-ity-key="${escapeAttribute(key)}"$2`);
 }
 function templateToString(result) {
     var _a, _b;
@@ -1428,6 +1941,10 @@ function templateToString(result) {
                         }
                         continue;
                     }
+                    if (entry.kind === "attr" && entryName === "key") {
+                        serialized.push(`data-ity-key="${escapeAttribute(String(entryValue))}"`);
+                        continue;
+                    }
                     serialized.push(`${entryName}="${escapeAttribute(stringifyAttribute(entryName, entryValue))}"`);
                 }
                 source += serialized.length ? `${before}${serialized.join(" ")}` : before;
@@ -1438,6 +1955,9 @@ function templateToString(result) {
             }
             else if (kind === "bool") {
                 source += value ? `${before}${name}` : before;
+            }
+            else if (kind === "attr" && name === "key") {
+                source += `${before}data-ity-key="${escapeAttribute(String(value))}"`;
             }
             else {
                 source += `${before}${name || ""}="${escapeAttribute(stringifyAttribute(name || "", value))}"`;
@@ -1473,6 +1993,21 @@ function escapeAttribute(value) {
     return escapeHTML(value)
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
+}
+function findNearestScope(node) {
+    var _a, _b;
+    let current = node;
+    while (current) {
+        const scoped = renderScopeByTarget.get(current);
+        if (scoped)
+            return scoped;
+        const root = (_b = (_a = current).getRootNode) === null || _b === void 0 ? void 0 : _b.call(_a);
+        if (root && root !== current && renderScopeByTarget.has(root)) {
+            return renderScopeByTarget.get(root);
+        }
+        current = current.parentNode || current.host || null;
+    }
+    return null;
 }
 function component(name, setupOrOptions, maybeOptions = {}) {
     const win = getWindow();
@@ -1540,6 +2075,8 @@ function component(name, setupOrOptions, maybeOptions = {}) {
         ensureMount() {
             if (this.mount && this.renderTarget)
                 return;
+            const parentScope = findNearestScope(this.parentNode || this);
+            this.scopeNode || (this.scopeNode = new ScopeNode({ parent: parentScope, name: `component:${name}` }));
             const shadow = definition.shadow;
             if (shadow === false) {
                 this.mount = this;
@@ -1563,13 +2100,17 @@ function component(name, setupOrOptions, maybeOptions = {}) {
             else {
                 this.renderTarget = this.mount;
             }
+            renderScopeByTarget.set(this, this.scopeNode);
+            renderScopeByTarget.set(this.mount, this.scopeNode);
+            renderScopeByTarget.set(this.renderTarget, this.scopeNode);
         }
         startRender() {
             if (this.renderCleanup || this.renderOutput === undefined)
                 return;
             this.renderCleanup = render(this.renderOutput, this.renderTarget, {
                 transition: false,
-                config: definition.config
+                config: definition.config,
+                scope: this.scopeNode
             });
         }
         startEffects() {
@@ -1602,8 +2143,11 @@ function component(name, setupOrOptions, maybeOptions = {}) {
             return {
                 host: this,
                 root: this.mount,
+                scope: this.scopeNode,
                 attr: (name) => this.ensureAttrSignal(name),
                 prop: (name) => this.ensurePropSignal(name),
+                provide: (key, value) => this.scopeNode.provide(key, value),
+                inject: (key, fallback) => this.scopeNode.signal(key, fallback),
                 emit: (name, detail, options = {}) => this.dispatchEvent(new CustomEvent(name, {
                     bubbles: true,
                     composed: true,
@@ -2193,11 +2737,19 @@ class Router {
         this.linkSelector = options.linkSelector || "a[href]";
         this.transition = Boolean(options.transition);
         this.notFound = options.notFound;
+        this.name = options.name || "router";
+        this.scope = options.scope || new ScopeNode({ name: `${this.name}:scope` });
         if (options.autoStart !== false)
             this.start();
     }
     add(pattern, handler) {
         this.routes.push(createRouteRecord(pattern, handler));
+        emitRuntimeEvent({
+            type: "router:add",
+            timestamp: Date.now(),
+            name: this.name,
+            detail: { pattern }
+        });
         return this;
     }
     addRoute(pattern, handler) {
@@ -2221,6 +2773,12 @@ class Router {
         const update = () => {
             const method = options.replace ? "replaceState" : "pushState";
             win.history[method](null, "", withBasePath(path, this.base));
+            emitRuntimeEvent({
+                type: "router:navigate",
+                timestamp: Date.now(),
+                name: this.name,
+                detail: { path, replace: Boolean(options.replace) }
+            });
             this.check();
         };
         withViewTransition(update, (_a = options.transition) !== null && _a !== void 0 ? _a : this.transition);
@@ -2261,6 +2819,7 @@ class Router {
         doc === null || doc === void 0 ? void 0 : doc.addEventListener("click", this.clickListener);
         (_b = (_a = win.navigation) === null || _a === void 0 ? void 0 : _a.addEventListener) === null || _b === void 0 ? void 0 : _b.call(_a, "navigate", this.navigationListener);
         this.started = true;
+        emitRuntimeEvent({ type: "router:start", timestamp: Date.now(), name: this.name });
         this.check();
     }
     stop() {
@@ -2274,6 +2833,65 @@ class Router {
         }
         this.started = false;
         this.disposeRoute();
+        emitRuntimeEvent({ type: "router:stop", timestamp: Date.now(), name: this.name });
+    }
+    resource(pattern, loader, options = {}) {
+        const matcher = pattern ? createRouteRecord(pattern, () => undefined) : null;
+        const routeResource = resource(({ signal, previous, refreshId }) => {
+            const context = this.current.peek();
+            if (!context)
+                return previous;
+            if (matcher) {
+                const params = matcher.exec(context.url);
+                if (!params)
+                    return previous;
+                return loader({
+                    ...context,
+                    params: { ...context.params, ...params },
+                    signal,
+                    previous,
+                    refreshId,
+                    router: this,
+                    scope: this.scope
+                });
+            }
+            return loader({
+                ...context,
+                signal,
+                previous,
+                refreshId,
+                router: this,
+                scope: this.scope
+            });
+        }, {
+            ...options,
+            immediate: false,
+            name: options.name || `${this.name}.resource`
+        });
+        effect(() => {
+            const context = this.current();
+            if (!context) {
+                routeResource.abort();
+                routeResource.mutate(undefined);
+                return;
+            }
+            if (matcher && !matcher.exec(context.url)) {
+                routeResource.abort();
+                routeResource.mutate(undefined);
+                return;
+            }
+            routeResource.refresh();
+        });
+        return routeResource;
+    }
+    action(handler, options = {}) {
+        return action((...args) => {
+            const context = this.current.peek();
+            return handler(context ? { ...context, router: this, scope: this.scope } : null, ...args);
+        }, {
+            ...options,
+            name: options.name || `${this.name}.action`
+        });
     }
     check() {
         var _a;
@@ -2307,6 +2925,12 @@ class Router {
             this.disposeRoute();
             this.activeRoute = route;
             this.current.set(context);
+            emitRuntimeEvent({
+                type: "router:match",
+                timestamp: Date.now(),
+                name: this.name,
+                detail: { pattern: route.pattern, path: context.path, params: context.params }
+            });
             const cleanup = route.handler(params, context);
             if (typeof cleanup === "function")
                 this.routeCleanup = cleanup;
@@ -2321,6 +2945,12 @@ class Router {
             params: {},
             query: searchParamsToObject(url.search),
             hash: searchParamsToObject(url.hash)
+        });
+        emitRuntimeEvent({
+            type: "router:not-found",
+            timestamp: Date.now(),
+            name: this.name,
+            detail: { path: routePath || "/" }
         });
         if (typeof cleanup === "function")
             this.routeCleanup = cleanup;
@@ -2513,9 +3143,11 @@ function route(pattern, handler) {
     return router;
 }
 const Ity = {
-    version: "2.2.0",
+    version: "3.0.0",
     createConfig,
     configure,
+    createScope,
+    observeRuntime,
     signal,
     computed,
     effect,
@@ -2529,8 +3161,10 @@ const Ity = {
     form,
     formState,
     html,
+    repeat,
     unsafeHTML,
     render,
+    hydrate,
     renderToString,
     component,
     route,
@@ -2560,5 +3194,5 @@ if (win) {
     win.Ity = Ity;
 }
 
-export { Application, Collection, Model, Router, SelectorObject, View, action, batch, component, computed, configure, createConfig, Ity as default, effect, form, formState, html, isSignal, onDOMReady, render, renderToString, resolveSignal, resource, route, signal, store, unsafeHTML, untrack };
+export { Application, Collection, Model, Router, SelectorObject, View, action, batch, component, computed, configure, createConfig, createScope, Ity as default, effect, form, formState, html, hydrate, isSignal, observeRuntime, onDOMReady, render, renderToString, repeat, resolveSignal, resource, route, signal, store, unsafeHTML, untrack };
 //# sourceMappingURL=ity.esm.mjs.map

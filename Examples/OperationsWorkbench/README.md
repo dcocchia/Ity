@@ -1,14 +1,22 @@
 # Operations Workbench
 
-`Operations Workbench` is a full local-first Ity 2.2 example. It is intentionally larger than the other demos and exercises the V2 surface as an integrated application instead of isolated snippets.
+`Operations Workbench` is a full local-first Ity 3.0 example. It is
+intentionally larger than the other demos and exercises the v3 surface as an
+integrated application instead of isolated snippets.
 
 ## What It Shows
 
-* `resource()` for cancellable async workspace loading from local storage.
-* `action()` for task status changes, checklist toggles, deletes, and resets.
-* `formState()` for task, note, settings, and import flows.
+* `ity/query` for cached workspace loading and mutation wiring.
+* `ity/forms` for nested task drafting, checklist field arrays, and explicit
+  `form.sync()` before structural edits.
+* `Router.resource()` and `Router.action()` patterns through route-driven task
+  screens and mutations.
 * `store()` for view state and persisted UI preferences.
-* `Router` base-path handling plus `router.link()` across dashboard, task, notes, reports, and settings pages.
+* `Router` base-path handling plus `router.link()` across dashboard, task,
+  notes, reports, and settings pages.
+* `repeat()` for keyed task, note, checklist, and runtime-feed rendering.
+* `createScope()` for router and repository injection into custom elements.
+* `observeRuntime()` for the in-app kernel activity feed.
 * `component()` props for reusable metric, task-card, and relative-time custom elements.
 * `unsafeHTML()` plus `createConfig({ sanitizeHTML })` for bulletin and report preview rendering.
 * `renderToString()` for a shareable status report view.

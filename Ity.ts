@@ -1,4 +1,4 @@
-// Ity.ts 2.2.0
+// Ity.ts 3.0.0
 // (c) 2026 Dominic Cocchiarella
 // Tiny dependency-free reactive app kernel with V1 MVC compatibility.
 declare var define: any;
@@ -11,6 +11,7 @@ type MaybeSignal<T> = T | ReadonlySignal<T>;
 type TemplateValue =
   | TemplateResult
   | UnsafeHTML
+  | RepeatResult
   | Node
   | string
   | number
@@ -45,6 +46,7 @@ interface ReactiveObserver {
 
 interface ComputedOptions<T> {
   equals?: Equality<T>;
+  name?: string;
 }
 
 interface SignalOptions<T> {
@@ -63,6 +65,11 @@ interface TemplateResult {
   readonly values: readonly unknown[];
 }
 
+interface RepeatResult {
+  readonly isRepeatResult: true;
+  readonly values: readonly unknown[];
+}
+
 interface UnsafeHTML {
   readonly isUnsafeHTML: true;
   readonly value: string;
@@ -77,12 +84,52 @@ interface UnsafeHTMLOptions {
 
 interface ItyConfig {
   sanitizeHTML?: HTMLSanitizer | null;
+  onWarning?: ((warning: RuntimeWarning) => void) | null;
 }
 
 interface RenderOptions {
   reactive?: boolean;
   transition?: boolean;
   config?: ItyConfig | null;
+  mode?: "replace" | "morph";
+  scope?: ItyScope | null;
+  warnOnMismatch?: boolean;
+}
+
+interface RuntimeWarning {
+  code: string;
+  message: string;
+  detail?: unknown;
+}
+
+interface RuntimeEventBase {
+  type: string;
+  timestamp: number;
+}
+
+interface RuntimeEvent extends RuntimeEventBase {
+  name?: string;
+  detail?: unknown;
+}
+
+type RuntimeObserver = (event: RuntimeEvent) => void;
+
+type ScopeKey = string | symbol;
+
+interface ScopeOptions {
+  parent?: ItyScope | null;
+  name?: string;
+}
+
+interface ItyScope {
+  readonly parent: ItyScope | null;
+  readonly name: string | null;
+  provide<T>(key: ScopeKey, value: T): Signal<T>;
+  set<T>(key: ScopeKey, value: T): T;
+  get<T>(key: ScopeKey, fallback?: T): T;
+  signal<T>(key: ScopeKey, fallback?: T): ReadonlySignal<T>;
+  has(key: ScopeKey): boolean;
+  delete(key: ScopeKey): void;
 }
 
 type StoreKey = string | symbol;
@@ -109,6 +156,7 @@ interface ResourceOptions<T, E = unknown> {
   keepPrevious?: boolean;
   onSuccess?: (value: T) => void;
   onError?: (error: E) => void;
+  name?: string;
 }
 
 interface Resource<T, E = unknown> {
@@ -125,6 +173,7 @@ interface Resource<T, E = unknown> {
 interface ActionOptions<TResult, E = unknown> {
   onSuccess?: (value: TResult) => void;
   onError?: (error: E) => void;
+  name?: string;
 }
 
 interface Action<TArgs extends unknown[], TResult, E = unknown> {
@@ -233,7 +282,123 @@ let activeObserver: ReactiveObserver | null = null;
 let batchDepth = 0;
 const pendingEffects = new Set<ReactiveEffect>();
 let configuredSanitizeHTML: HTMLSanitizer | undefined;
+let configuredWarningHandler: ((warning: RuntimeWarning) => void) | undefined;
 const activeConfigStack: Array<ItyConfig | null> = [];
+const runtimeObservers = new Set<RuntimeObserver>();
+const renderScopeByTarget = new WeakMap<object, ItyScope>();
+let scopeId = 0;
+let runtimeDispatchDepth = 0;
+
+function emitRuntimeEvent(event: RuntimeEvent): void {
+  if (runtimeDispatchDepth > 0 || runtimeObservers.size === 0) return;
+  runtimeDispatchDepth += 1;
+  try {
+    for (const observer of Array.from(runtimeObservers)) {
+      observer(event);
+    }
+  } finally {
+    runtimeDispatchDepth -= 1;
+  }
+}
+
+function observeRuntime(observer: RuntimeObserver): Cleanup {
+  runtimeObservers.add(observer);
+  return () => {
+    runtimeObservers.delete(observer);
+  };
+}
+
+function warnRuntime(code: string, message: string, detail?: unknown): void {
+  const warning: RuntimeWarning = { code, message, detail };
+  const handler = currentConfig()?.onWarning || configuredWarningHandler;
+  handler?.(warning);
+  emitRuntimeEvent({
+    type: "warning",
+    timestamp: Date.now(),
+    name: code,
+    detail: warning
+  });
+}
+
+class ScopeNode implements ItyScope {
+  readonly parent: ItyScope | null;
+  readonly name: string | null;
+  private entries = new Map<ScopeKey, Signal<unknown>>();
+  private readonly structure: Signal<number>;
+
+  constructor(options: ScopeOptions = {}) {
+    this.parent = options.parent || null;
+    this.name = options.name || `scope:${++scopeId}`;
+    this.structure = signal(0, { name: `${this.name ?? "scope"}.structure` });
+  }
+
+  private bumpStructure(): void {
+    this.structure.update((value) => value + 1);
+  }
+
+  private readSignalValue<T>(key: ScopeKey, fallback?: T): T {
+    this.structure();
+    if (this.entries.has(key)) return (this.entries.get(key)! as Signal<T>)();
+    if (this.parent instanceof ScopeNode) return this.parent.readSignalValue(key, fallback as T);
+    if (this.parent) return this.parent.signal(key, fallback as T)();
+    return fallback as T;
+  }
+
+  provide<T>(key: ScopeKey, value: T): Signal<T> {
+    const existing = this.entries.get(key) as Signal<T> | undefined;
+    if (existing) {
+      existing.set(value);
+      return existing;
+    }
+    const entry = signal(value, { name: `${this.name ?? "scope"}.${String(key)}` });
+    this.entries.set(key, entry as Signal<unknown>);
+    this.bumpStructure();
+    emitRuntimeEvent({
+      type: "scope:provide",
+      timestamp: Date.now(),
+      name: this.name || undefined,
+      detail: { key: String(key), value }
+    });
+    return entry;
+  }
+
+  set<T>(key: ScopeKey, value: T): T {
+    this.provide(key, value);
+    return value;
+  }
+
+  get<T>(key: ScopeKey, fallback?: T): T {
+    if (this.entries.has(key)) return (this.entries.get(key)! as Signal<T>)();
+    if (this.parent) return this.parent.get(key, fallback as T);
+    return fallback as T;
+  }
+
+  signal<T>(key: ScopeKey, fallback?: T): ReadonlySignal<T> {
+    return computed(() => {
+      return this.readSignalValue(key, fallback);
+    });
+  }
+
+  has(key: ScopeKey): boolean {
+    return this.entries.has(key) || Boolean(this.parent?.has(key));
+  }
+
+  delete(key: ScopeKey): void {
+    if (!this.entries.has(key)) return;
+    this.entries.delete(key);
+    this.bumpStructure();
+    emitRuntimeEvent({
+      type: "scope:delete",
+      timestamp: Date.now(),
+      name: this.name || undefined,
+      detail: { key: String(key) }
+    });
+  }
+}
+
+function createScope(options: ScopeOptions = {}): ItyScope {
+  return new ScopeNode(options);
+}
 
 function getWindow(): (Window & typeof globalThis) | undefined {
   return typeof window !== "undefined" ? window : undefined;
@@ -352,10 +517,12 @@ class SignalNode<T> implements ReactiveSource {
   private subscribers = new Set<Subscriber<T>>();
   private value: T;
   private equals: Equality<T>;
+  private name: string | undefined;
 
   constructor(value: T, options: SignalOptions<T> = {}) {
     this.value = value;
     this.equals = options.equals || defaultEquals;
+    this.name = options.name;
   }
 
   read(track = true): T {
@@ -370,6 +537,12 @@ class SignalNode<T> implements ReactiveSource {
       : next;
     if (this.equals(previous, resolved)) return previous;
     this.value = resolved;
+    emitRuntimeEvent({
+      type: "signal:set",
+      timestamp: Date.now(),
+      name: this.name,
+      detail: { previous, value: resolved }
+    });
     notifyObservers(this);
     for (const subscriber of Array.from(this.subscribers)) {
       subscriber(resolved, previous);
@@ -395,9 +568,11 @@ class ComputedNode<T> implements ReactiveSource, ReactiveObserver {
   private initialized = false;
   private value!: T;
   private equals: Equality<T>;
+  private name: string | undefined;
 
   constructor(private readonly getter: () => T, options: ComputedOptions<T> = {}) {
     this.equals = options.equals || defaultEquals;
+    this.name = (options as any).name;
   }
 
   read(track = true): T {
@@ -440,6 +615,11 @@ class ComputedNode<T> implements ReactiveSource, ReactiveObserver {
       this.value = this.getter();
       this.dirty = false;
       this.initialized = true;
+      emitRuntimeEvent({
+        type: "computed:evaluate",
+        timestamp: Date.now(),
+        name: this.name
+      });
     } finally {
       activeObserver = previousObserver;
     }
@@ -555,11 +735,13 @@ function resolveSignal<T>(value: MaybeSignal<T>): T {
 
 function configure(options: ItyConfig = {}): void {
   configuredSanitizeHTML = options.sanitizeHTML || undefined;
+  configuredWarningHandler = options.onWarning || undefined;
 }
 
 function createConfig(options: ItyConfig = {}): ItyConfig {
   const config: ItyConfig = {};
   if (hasOwn(options, "sanitizeHTML")) config.sanitizeHTML = options.sanitizeHTML ?? null;
+  if (hasOwn(options, "onWarning")) config.onWarning = options.onWarning ?? null;
   return config;
 }
 
@@ -693,6 +875,12 @@ function resource<T, E = unknown>(
       pending.set(true);
       statusValue.set("loading");
       error.set(null);
+      emitRuntimeEvent({
+        type: "resource:refresh",
+        timestamp: Date.now(),
+        name: options.name,
+        detail: { refreshId: id }
+      });
       if (!keepPrevious) data.set(undefined);
 
       currentPromise = Promise.resolve()
@@ -702,6 +890,12 @@ function resource<T, E = unknown>(
           data.set(value);
           error.set(null);
           statusValue.set("success");
+          emitRuntimeEvent({
+            type: "resource:success",
+            timestamp: Date.now(),
+            name: options.name,
+            detail: { refreshId: id, value }
+          });
           options.onSuccess?.(value);
           return value;
         })
@@ -709,6 +903,12 @@ function resource<T, E = unknown>(
           if (id !== refreshId) return data.peek();
           error.set(err as E);
           statusValue.set("error");
+          emitRuntimeEvent({
+            type: "resource:error",
+            timestamp: Date.now(),
+            name: options.name,
+            detail: { refreshId: id, error: err }
+          });
           options.onError?.(err as E);
           return data.peek();
         })
@@ -730,6 +930,12 @@ function resource<T, E = unknown>(
       error.set(null);
       pending.set(false);
       statusValue.set(value === undefined ? "idle" : "success");
+      emitRuntimeEvent({
+        type: "resource:mutate",
+        timestamp: Date.now(),
+        name: options.name,
+        detail: { value }
+      });
     },
     abort(reason?: unknown) {
       if (!controller) return;
@@ -739,6 +945,12 @@ function resource<T, E = unknown>(
       currentPromise = null;
       pending.set(false);
       statusValue.set(data.peek() === undefined ? "idle" : "success");
+      emitRuntimeEvent({
+        type: "resource:abort",
+        timestamp: Date.now(),
+        name: options.name,
+        detail: { reason }
+      });
     }
   };
 
@@ -767,6 +979,12 @@ function action<TArgs extends unknown[], TResult, E = unknown>(
     count.update((value) => value + 1);
     statusValue.set("loading");
     error.set(null);
+    emitRuntimeEvent({
+      type: "action:start",
+      timestamp: Date.now(),
+      name: options.name,
+      detail: { args }
+    });
 
     return Promise.resolve()
       .then(() => handler(...args))
@@ -774,6 +992,12 @@ function action<TArgs extends unknown[], TResult, E = unknown>(
         if (runGeneration === generation) {
           data.set(value);
           error.set(null);
+          emitRuntimeEvent({
+            type: "action:success",
+            timestamp: Date.now(),
+            name: options.name,
+            detail: { args, value }
+          });
           options.onSuccess?.(value);
           if (count.peek() <= 1) statusValue.set("success");
         }
@@ -782,6 +1006,12 @@ function action<TArgs extends unknown[], TResult, E = unknown>(
       .catch((err) => {
         if (runGeneration === generation) {
           error.set(err as E);
+          emitRuntimeEvent({
+            type: "action:error",
+            timestamp: Date.now(),
+            name: options.name,
+            detail: { args, error: err }
+          });
           options.onError?.(err as E);
           if (count.peek() <= 1) statusValue.set("error");
         }
@@ -831,6 +1061,11 @@ function action<TArgs extends unknown[], TResult, E = unknown>(
     error.set(null);
     count.set(0);
     statusValue.set("idle");
+    emitRuntimeEvent({
+      type: "action:reset",
+      timestamp: Date.now(),
+      name: options.name
+    });
   };
   return callable;
 }
@@ -1298,10 +1533,68 @@ function normalizeValue(value: unknown): unknown {
   return isSignal(value) ? value() : value;
 }
 
+function isRepeatResult(value: unknown): value is RepeatResult {
+  return !!value && typeof value === "object" && (value as RepeatResult).isRepeatResult === true;
+}
+
+function repeat<T>(
+  items: readonly T[] | ReadonlySignal<readonly T[]> | (() => readonly T[]),
+  key: (item: T, index: number) => string | number,
+  renderItem: (item: T, index: number) => unknown
+): RepeatResult {
+  const resolvedItems = typeof items === "function"
+    ? (items as (() => readonly T[]))()
+    : resolveSignal(items as readonly T[] | ReadonlySignal<readonly T[]>);
+  const values = Array.from(resolvedItems || []).map((item, index) => ({
+    __ityRepeatKey: String(key(item, index)),
+    __ityRepeatValue: renderItem(item, index)
+  }));
+  const keys = new Set<string>();
+  for (const entry of values) {
+    if (keys.has(entry.__ityRepeatKey)) {
+      warnRuntime("repeat-duplicate-key", `Ity.repeat encountered a duplicate key "${entry.__ityRepeatKey}".`, {
+        key: entry.__ityRepeatKey
+      });
+    }
+    keys.add(entry.__ityRepeatKey);
+  }
+  return {
+    isRepeatResult: true,
+    values
+  };
+}
+
 function valueToFragment(value: unknown, doc: Document = documentOrThrow()): DocumentFragment {
   const fragment = doc.createDocumentFragment();
   appendValue(fragment, normalizeValue(value), doc);
   return fragment;
+}
+
+function applyRepeatKey(node: Node, key: string): void {
+  if (node.nodeType === 1) {
+    (node as any).__ityKey = key;
+  }
+}
+
+function appendRepeatValue(parent: Node, entry: { __ityRepeatKey: string; __ityRepeatValue: unknown }, doc: Document): void {
+  const fragment = valueToFragment(entry.__ityRepeatValue, doc);
+  const nodes = Array.from(fragment.childNodes).filter((node) => {
+    return node.nodeType !== 3 || Boolean(node.textContent && node.textContent.trim());
+  });
+  if (nodes.length === 0) return;
+  if (nodes.length > 1) {
+    throw new Error("Ity.repeat items must render exactly one root node.");
+  }
+  const node = nodes[0];
+  if (fragment.firstChild !== node) {
+    fragment.textContent = "";
+    fragment.appendChild(node);
+  }
+  if (node.nodeType !== 1) {
+    throw new Error("Ity.repeat items must render an element root node.");
+  }
+  applyRepeatKey(node, entry.__ityRepeatKey);
+  parent.appendChild(fragment);
 }
 
 function appendValue(parent: Node, value: unknown, doc: Document): void {
@@ -1309,6 +1602,12 @@ function appendValue(parent: Node, value: unknown, doc: Document): void {
   if (value === null || value === undefined || value === false) return;
   if (Array.isArray(value)) {
     for (const item of value) appendValue(parent, item, doc);
+    return;
+  }
+  if (isRepeatResult(value)) {
+    for (const entry of value.values as Array<{ __ityRepeatKey: string; __ityRepeatValue: unknown }>) {
+      appendRepeatValue(parent, entry, doc);
+    }
     return;
   }
   if (isTemplateResult(value)) {
@@ -1334,6 +1633,16 @@ interface Binding {
   name?: string;
 }
 
+interface EventBindingRecord {
+  listener: EventListener;
+  options?: boolean | AddEventListenerOptions;
+}
+
+interface ManagedBindingMeta {
+  events: Map<string, EventBindingRecord[]>;
+  props: Map<string, unknown>;
+}
+
 interface FocusSelectionState {
   start: number;
   end: number;
@@ -1355,6 +1664,70 @@ function bindingFromName(rawName: string): Pick<Binding, "kind" | "name"> {
   const kind = first === "@" ? "event" : first === "." ? "prop" : first === "?" ? "bool" : "attr";
   const name = kind === "attr" ? rawName : rawName.slice(1);
   return { kind, name };
+}
+
+function readManagedBindingMeta(element: HTMLElement): ManagedBindingMeta | null {
+  return ((element as any).__ityBindings as ManagedBindingMeta | undefined) || null;
+}
+
+function setManagedBindingMeta(element: HTMLElement, meta: ManagedBindingMeta): void {
+  (element as any).__ityBindings = meta;
+}
+
+function ensureManagedBindingMeta(element: HTMLElement): ManagedBindingMeta {
+  const existing = readManagedBindingMeta(element);
+  if (existing) return existing;
+  const meta: ManagedBindingMeta = {
+    events: new Map(),
+    props: new Map()
+  };
+  setManagedBindingMeta(element, meta);
+  return meta;
+}
+
+function setElementKey(element: HTMLElement, key: string | null): void {
+  if (key === null || key === undefined) {
+    delete (element as any).__ityKey;
+    element.removeAttribute("data-ity-key");
+    return;
+  }
+  (element as any).__ityKey = key;
+  element.setAttribute("data-ity-key", key);
+}
+
+function getNodeKey(node: Node | null | undefined): string | null {
+  if (!node || node.nodeType !== 1) return null;
+  const element = node as HTMLElement;
+  const stored = (element as any).__ityKey;
+  if (typeof stored === "string" && stored) return stored;
+  const attr = element.getAttribute("data-ity-key");
+  return attr || null;
+}
+
+function applyEventBinding(element: HTMLElement, name: string, value: unknown): void {
+  const records: EventBindingRecord[] = [];
+  if (typeof value === "function") {
+    const record = { listener: value as EventListener };
+    element.addEventListener(name, record.listener);
+    records.push(record);
+  } else if (Array.isArray(value) && typeof value[0] === "function") {
+    const record = { listener: value[0] as EventListener, options: value[1] as boolean | AddEventListenerOptions | undefined };
+    element.addEventListener(name, record.listener, record.options);
+    records.push(record);
+  }
+  ensureManagedBindingMeta(element).events.set(name, records);
+}
+
+function applyPropertyBinding(element: HTMLElement, name: string, value: unknown): void {
+  if (name === "value" && Array.isArray(value) && element.tagName === "SELECT" && (element as HTMLSelectElement).multiple) {
+    const selectedValues = new Set(value.map((entry) => String(entry)));
+    Array.from((element as HTMLSelectElement).options).forEach((option) => {
+      option.selected = selectedValues.has(option.value);
+    });
+  } else {
+    (element as any)[name] = value;
+  }
+  ensureManagedBindingMeta(element).props.set(name, value);
 }
 
 function materializeTemplate(result: TemplateResult, doc: Document = documentOrThrow()): DocumentFragment {
@@ -1432,23 +1805,12 @@ function applyElementBinding(element: HTMLElement, binding: Binding, value: unkn
   }
 
   if (binding.kind === "event") {
-    if (typeof value === "function") {
-      element.addEventListener(name, value as EventListener);
-    } else if (Array.isArray(value) && typeof value[0] === "function") {
-      element.addEventListener(name, value[0] as EventListener, value[1] as AddEventListenerOptions);
-    }
+    applyEventBinding(element, name, value);
     return;
   }
 
   if (binding.kind === "prop") {
-    if (name === "value" && Array.isArray(value) && element.tagName === "SELECT" && (element as HTMLSelectElement).multiple) {
-      const selectedValues = new Set(value.map((entry) => String(entry)));
-      Array.from((element as HTMLSelectElement).options).forEach((option) => {
-        option.selected = selectedValues.has(option.value);
-      });
-      return;
-    }
-    (element as any)[name] = value;
+    applyPropertyBinding(element, name, value);
     return;
   }
 
@@ -1458,7 +1820,13 @@ function applyElementBinding(element: HTMLElement, binding: Binding, value: unkn
   }
 
   if (value === false || value === null || value === undefined) {
+    if (name === "key") setElementKey(element, null);
     element.removeAttribute(name);
+    return;
+  }
+
+  if (name === "key") {
+    setElementKey(element, String(value));
     return;
   }
 
@@ -1628,6 +1996,197 @@ function restoreFocusState(target: Element | DocumentFragment, state: FocusResto
   }
 }
 
+function cleanupManagedBindings(element: HTMLElement): void {
+  const meta = readManagedBindingMeta(element);
+  if (!meta) return;
+  for (const [eventName, records] of meta.events) {
+    for (const record of records) {
+      element.removeEventListener(eventName, record.listener, record.options);
+    }
+  }
+  meta.events.clear();
+  meta.props.clear();
+  delete (element as any).__ityBindings;
+}
+
+function cleanupManagedSubtree(node: Node): void {
+  if (node.nodeType === 1) {
+    cleanupManagedBindings(node as HTMLElement);
+    const walker = (node.ownerDocument || getDocument())?.createTreeWalker(node, 1);
+    let current = walker?.nextNode() || null;
+    while (current) {
+      cleanupManagedBindings(current as HTMLElement);
+      current = walker!.nextNode();
+    }
+  }
+}
+
+function syncManagedBindings(current: HTMLElement, next: HTMLElement): void {
+  const currentMeta = readManagedBindingMeta(current);
+  if (currentMeta) {
+    for (const [eventName, records] of currentMeta.events) {
+      for (const record of records) {
+        current.removeEventListener(eventName, record.listener, record.options);
+      }
+    }
+  }
+
+  const nextMeta = readManagedBindingMeta(next);
+  const synced: ManagedBindingMeta = {
+    events: new Map(),
+    props: new Map()
+  };
+
+  const previousPropNames = new Set<string>(currentMeta ? Array.from(currentMeta.props.keys()) : []);
+  if (nextMeta) {
+    for (const [eventName, records] of nextMeta.events) {
+      const applied = records.map((record) => ({ ...record }));
+      for (const record of applied) {
+        current.addEventListener(eventName, record.listener, record.options);
+      }
+      synced.events.set(eventName, applied);
+    }
+    for (const [propName, propValue] of nextMeta.props) {
+      applyPropertyBinding(current, propName, propValue);
+      synced.props.set(propName, propValue);
+      previousPropNames.delete(propName);
+    }
+  }
+
+  for (const propName of previousPropNames) {
+    try {
+      (current as any)[propName] = undefined;
+    } catch (_error) {
+      // Ignore non-writable host properties.
+    }
+  }
+
+  setManagedBindingMeta(current, synced);
+  setElementKey(current, getNodeKey(next));
+}
+
+function syncAttributes(current: HTMLElement, next: HTMLElement): void {
+  const currentAttrs = new Map<string, string>();
+  Array.from(current.attributes).forEach((attr) => currentAttrs.set(attr.name, attr.value));
+  const nextAttrs = new Map<string, string>();
+  Array.from(next.attributes).forEach((attr) => nextAttrs.set(attr.name, attr.value));
+
+  for (const name of Array.from(currentAttrs.keys())) {
+    if (!nextAttrs.has(name)) current.removeAttribute(name);
+  }
+  for (const [name, value] of nextAttrs) {
+    if (current.getAttribute(name) !== value) {
+      current.setAttribute(name, value);
+    }
+  }
+}
+
+function canMorphNode(current: Node, next: Node): boolean {
+  if (current.nodeType !== next.nodeType) return false;
+  if (current.nodeType === 1) {
+    const currentElement = current as HTMLElement;
+    const nextElement = next as HTMLElement;
+    const currentKey = getNodeKey(currentElement);
+    const nextKey = getNodeKey(nextElement);
+    if (currentKey !== nextKey) return false;
+    return currentElement.tagName === nextElement.tagName;
+  }
+  return true;
+}
+
+function findCompatibleUnkeyedNode(oldNodes: Node[], used: Set<Node>, next: Node, fromIndex: number): { node: Node | null; nextIndex: number } {
+  for (let i = fromIndex; i < oldNodes.length; i += 1) {
+    const candidate = oldNodes[i];
+    if (used.has(candidate) || getNodeKey(candidate) !== null) continue;
+    if (canMorphNode(candidate, next)) {
+      return { node: candidate, nextIndex: i + 1 };
+    }
+  }
+  for (let i = 0; i < fromIndex; i += 1) {
+    const candidate = oldNodes[i];
+    if (used.has(candidate) || getNodeKey(candidate) !== null) continue;
+    if (canMorphNode(candidate, next)) {
+      return { node: candidate, nextIndex: fromIndex };
+    }
+  }
+  return { node: null, nextIndex: fromIndex };
+}
+
+function createKeyMap(nodes: readonly Node[]): Map<string, Node> {
+  const map = new Map<string, Node>();
+  for (const node of nodes) {
+    const key = getNodeKey(node);
+    if (!key) continue;
+    if (map.has(key)) {
+      warnRuntime("duplicate-key", `Ity encountered duplicate DOM keys for "${key}" during reconciliation.`, { key });
+      continue;
+    }
+    map.set(key, node);
+  }
+  return map;
+}
+
+function morphNode(current: Node, next: Node): void {
+  if (!canMorphNode(current, next)) {
+    cleanupManagedSubtree(current);
+    if (current.parentNode) current.parentNode.replaceChild(next, current);
+    return;
+  }
+  if (current.nodeType === 3 || current.nodeType === 8) {
+    if ((current as CharacterData).data !== (next as CharacterData).data) {
+      (current as CharacterData).data = (next as CharacterData).data;
+    }
+    return;
+  }
+  const currentElement = current as HTMLElement;
+  const nextElement = next as HTMLElement;
+  syncAttributes(currentElement, nextElement);
+  syncManagedBindings(currentElement, nextElement);
+  morphChildNodes(currentElement, nextElement);
+}
+
+function morphChildNodes(currentParent: Element | DocumentFragment, nextParent: Element | DocumentFragment): void {
+  const oldNodes = Array.from(currentParent.childNodes);
+  const newNodes = Array.from(nextParent.childNodes);
+  const used = new Set<Node>();
+  const keyed = createKeyMap(oldNodes);
+  let searchIndex = 0;
+  let referenceNode = currentParent.firstChild;
+
+  for (const next of newNodes) {
+    const key = getNodeKey(next);
+    let matched: Node | null = null;
+    if (key !== null) {
+      matched = keyed.get(key) || null;
+    } else {
+      const result = findCompatibleUnkeyedNode(oldNodes, used, next, searchIndex);
+      matched = result.node;
+      searchIndex = result.nextIndex;
+    }
+
+    if (matched && used.has(matched)) {
+      matched = null;
+    }
+
+    if (matched) {
+      used.add(matched);
+      morphNode(matched, next);
+      if (matched !== referenceNode) currentParent.insertBefore(matched, referenceNode);
+      referenceNode = matched.nextSibling;
+    } else {
+      currentParent.insertBefore(next, referenceNode);
+      referenceNode = next.nextSibling;
+    }
+  }
+
+  for (const oldNode of oldNodes) {
+    if (!used.has(oldNode)) {
+      cleanupManagedSubtree(oldNode);
+      oldNode.remove();
+    }
+  }
+}
+
 function resolveTarget(target: string | Element | DocumentFragment | SelectorObject): Element | DocumentFragment {
   if (typeof target === "string") {
     const found = documentOrThrow().querySelector(target);
@@ -1642,16 +2201,24 @@ function resolveTarget(target: string | Element | DocumentFragment | SelectorObj
   return target as Element | DocumentFragment;
 }
 
-function replaceChildren(target: Element | DocumentFragment, fragment: DocumentFragment): void {
+function replaceChildren(target: Element | DocumentFragment, fragment: DocumentFragment, options: RenderOptions = {}): void {
   const focusState = captureFocusState(target);
-  const maybeTarget = target as any;
-  if (typeof maybeTarget.replaceChildren === "function") {
-    maybeTarget.replaceChildren(fragment);
+  if (options.mode === "replace") {
+    const maybeTarget = target as any;
+    if (typeof maybeTarget.replaceChildren === "function") {
+      maybeTarget.replaceChildren(fragment);
+      restoreFocusState(target, focusState);
+      return;
+    }
+    while (target.firstChild) {
+      cleanupManagedSubtree(target.firstChild);
+      target.removeChild(target.firstChild);
+    }
+    target.appendChild(fragment);
     restoreFocusState(target, focusState);
     return;
   }
-  while (target.firstChild) target.removeChild(target.firstChild);
-  target.appendChild(fragment);
+  morphChildNodes(target, fragment);
   restoreFocusState(target, focusState);
 }
 
@@ -1670,12 +2237,18 @@ function render(
   options: RenderOptions = {}
 ): Cleanup {
   const mount = resolveTarget(target);
+  const scope = options.scope || renderScopeByTarget.get(mount as object) || new ScopeNode({ parent: null, name: "render" });
+  renderScopeByTarget.set(mount as object, scope);
   const update = () => {
     withConfig(options.config, () => {
       const value = typeof view === "function" && !isSignal(view)
         ? (view as () => TemplateValue)()
         : normalizeValue(view);
-      withViewTransition(() => replaceChildren(mount, valueToFragment(value)), options.transition);
+      withViewTransition(() => replaceChildren(mount, valueToFragment(value), {
+        ...options,
+        mode: options.mode || "morph",
+        scope
+      }), options.transition);
     });
   };
 
@@ -1685,6 +2258,18 @@ function render(
   }
 
   return effect(update);
+}
+
+function hydrate(
+  view: TemplateValue | (() => TemplateValue),
+  target: string | Element | DocumentFragment | SelectorObject,
+  options: RenderOptions = {}
+): Cleanup {
+  return render(view, target, {
+    ...options,
+    mode: "morph",
+    warnOnMismatch: options.warnOnMismatch !== false
+  });
 }
 
 function renderToString(view: TemplateValue | (() => TemplateValue), options: RenderToStringOptions = {}): string {
@@ -1700,6 +2285,11 @@ function valueToString(value: unknown): string {
   value = normalizeValue(value);
   if (value === null || value === undefined || value === false) return "";
   if (Array.isArray(value)) return value.map(valueToString).join("");
+  if (isRepeatResult(value)) {
+    return (value.values as Array<{ __ityRepeatKey: string; __ityRepeatValue: unknown }>)
+      .map((entry) => valueToStringWithKey(entry.__ityRepeatValue, entry.__ityRepeatKey))
+      .join("");
+  }
   if (isTemplateResult(value)) return templateToString(value);
   if (isUnsafeHTML(value)) return value.value;
   if (isNodeLike(value)) {
@@ -1708,6 +2298,15 @@ function valueToString(value: unknown): string {
     return escapeHTML(node.textContent || "");
   }
   return escapeHTML(String(value));
+}
+
+function valueToStringWithKey(value: unknown, key: string): string {
+  const rendered = valueToString(value);
+  if (!rendered) return "";
+  if (!rendered.startsWith("<")) {
+    throw new Error("Ity.repeat items must render an element root node.");
+  }
+  return rendered.replace(/^<([A-Za-z][^\s/>]*)(\s|>)/, `<$1 data-ity-key="${escapeAttribute(key)}"$2`);
 }
 
 function templateToString(result: TemplateResult): string {
@@ -1739,6 +2338,10 @@ function templateToString(result: TemplateResult): string {
             }
             continue;
           }
+          if (entry.kind === "attr" && entryName === "key") {
+            serialized.push(`data-ity-key="${escapeAttribute(String(entryValue))}"`);
+            continue;
+          }
           serialized.push(`${entryName}="${escapeAttribute(stringifyAttribute(entryName, entryValue))}"`);
         }
         source += serialized.length ? `${before}${serialized.join(" ")}` : before;
@@ -1748,6 +2351,8 @@ function templateToString(result: TemplateResult): string {
         source += before;
       } else if (kind === "bool") {
         source += value ? `${before}${name}` : before;
+      } else if (kind === "attr" && name === "key") {
+        source += `${before}data-ity-key="${escapeAttribute(String(value))}"`;
       } else {
         source += `${before}${name || ""}="${escapeAttribute(stringifyAttribute(name || "", value))}"`;
       }
@@ -1785,11 +2390,28 @@ function escapeAttribute(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+function findNearestScope(node: Node | null): ItyScope | null {
+  let current: Node | null = node;
+  while (current) {
+    const scoped = renderScopeByTarget.get(current as object);
+    if (scoped) return scoped;
+    const root = (current as any).getRootNode?.();
+    if (root && root !== current && renderScopeByTarget.has(root as object)) {
+      return renderScopeByTarget.get(root as object)!;
+    }
+    current = (current as any).parentNode || (current as any).host || null;
+  }
+  return null;
+}
+
 interface ComponentContext {
   host: HTMLElement;
   root: HTMLElement | ShadowRoot;
+  scope: ItyScope;
   attr(name: string): ReadonlySignal<string | null>;
   prop<T = unknown>(name: string): ReadonlySignal<T>;
+  provide<T>(key: ScopeKey, value: T): Signal<T>;
+  inject<T>(key: ScopeKey, fallback?: T): ReadonlySignal<T>;
   emit<T = unknown>(name: string, detail?: T, options?: CustomEventInit<T>): boolean;
   effect(callback: (onCleanup: (cleanup: Cleanup) => void) => void): EffectHandle;
   onConnected(callback: () => void): void;
@@ -1847,6 +2469,7 @@ function component(
     private mount?: HTMLElement | ShadowRoot;
     private renderTarget?: HTMLElement | ShadowRoot;
     private renderOutput?: ComponentRender;
+    private scopeNode?: ItyScope;
     private initialized = false;
     private connected = false;
 
@@ -1886,6 +2509,8 @@ function component(
 
     private ensureMount(): void {
       if (this.mount && this.renderTarget) return;
+      const parentScope = findNearestScope(this.parentNode || this);
+      this.scopeNode ||= new ScopeNode({ parent: parentScope, name: `component:${name}` });
       const shadow = definition.shadow;
       if (shadow === false) {
         this.mount = this;
@@ -1908,13 +2533,17 @@ function component(
       } else {
         this.renderTarget = this.mount;
       }
+      renderScopeByTarget.set(this as unknown as object, this.scopeNode);
+      renderScopeByTarget.set(this.mount as unknown as object, this.scopeNode);
+      renderScopeByTarget.set(this.renderTarget as unknown as object, this.scopeNode);
     }
 
     private startRender(): void {
       if (this.renderCleanup || this.renderOutput === undefined) return;
       this.renderCleanup = render(this.renderOutput, this.renderTarget!, {
         transition: false,
-        config: definition.config
+        config: definition.config,
+        scope: this.scopeNode
       });
     }
 
@@ -1951,8 +2580,11 @@ function component(
       return {
         host: this,
         root: this.mount!,
+        scope: this.scopeNode!,
         attr: (name) => this.ensureAttrSignal(name),
         prop: <T = unknown>(name: string) => this.ensurePropSignal<T>(name),
+        provide: <T>(key: ScopeKey, value: T) => this.scopeNode!.provide(key, value),
+        inject: <T>(key: ScopeKey, fallback?: T) => this.scopeNode!.signal(key, fallback),
         emit: (name, detail, options = {}) => this.dispatchEvent(new CustomEvent(name, {
           bubbles: true,
           composed: true,
@@ -2595,6 +3227,16 @@ interface RouteContext {
   hash: Record<string, string>;
 }
 
+interface RouteResourceContext<T> extends ResourceContext<T>, RouteContext {
+  router: Router;
+  scope: ItyScope;
+}
+
+interface RouteActionContext extends RouteContext {
+  router: Router;
+  scope: ItyScope;
+}
+
 type RouteHandler = (params: Record<string, string>, context: RouteContext) => void | Cleanup;
 
 interface RouteRecord {
@@ -2609,6 +3251,8 @@ interface RouterOptions {
   linkSelector?: string;
   transition?: boolean;
   notFound?: RouteHandler;
+  scope?: ItyScope | null;
+  name?: string;
 }
 
 class Router {
@@ -2624,17 +3268,27 @@ class Router {
   public base: string;
   public linkSelector: string;
   public transition: boolean;
+  public scope: ItyScope;
+  public name: string;
 
   constructor(options: RouterOptions = {}) {
     this.base = options.base || "/";
     this.linkSelector = options.linkSelector || "a[href]";
     this.transition = Boolean(options.transition);
     this.notFound = options.notFound;
+    this.name = options.name || "router";
+    this.scope = options.scope || new ScopeNode({ name: `${this.name}:scope` });
     if (options.autoStart !== false) this.start();
   }
 
   add(pattern: string, handler: RouteHandler): this {
     this.routes.push(createRouteRecord(pattern, handler));
+    emitRuntimeEvent({
+      type: "router:add",
+      timestamp: Date.now(),
+      name: this.name,
+      detail: { pattern }
+    });
     return this;
   }
 
@@ -2658,6 +3312,12 @@ class Router {
     const update = () => {
       const method = options.replace ? "replaceState" : "pushState";
       win.history[method](null, "", withBasePath(path, this.base));
+      emitRuntimeEvent({
+        type: "router:navigate",
+        timestamp: Date.now(),
+        name: this.name,
+        detail: { path, replace: Boolean(options.replace) }
+      });
       this.check();
     };
     withViewTransition(update, options.transition ?? this.transition);
@@ -2698,6 +3358,7 @@ class Router {
     doc?.addEventListener("click", this.clickListener);
     (win as any).navigation?.addEventListener?.("navigate", this.navigationListener);
     this.started = true;
+    emitRuntimeEvent({ type: "router:start", timestamp: Date.now(), name: this.name });
     this.check();
   }
 
@@ -2711,6 +3372,74 @@ class Router {
     }
     this.started = false;
     this.disposeRoute();
+    emitRuntimeEvent({ type: "router:stop", timestamp: Date.now(), name: this.name });
+  }
+
+  resource<T, E = unknown>(
+    pattern: string | null,
+    loader: (context: RouteResourceContext<T>) => Promise<T> | T,
+    options: ResourceOptions<T, E> = {}
+  ): Resource<T, E> {
+    const matcher = pattern ? createRouteRecord(pattern, () => undefined) : null;
+    const routeResource = resource<T, E>(({ signal, previous, refreshId }) => {
+      const context = this.current.peek();
+      if (!context) return previous as T | undefined as T;
+      if (matcher) {
+        const params = matcher.exec(context.url);
+        if (!params) return previous as T | undefined as T;
+        return loader({
+          ...context,
+          params: { ...context.params, ...params },
+          signal,
+          previous,
+          refreshId,
+          router: this,
+          scope: this.scope
+        });
+      }
+      return loader({
+        ...context,
+        signal,
+        previous,
+        refreshId,
+        router: this,
+        scope: this.scope
+      });
+    }, {
+      ...options,
+      immediate: false,
+      name: options.name || `${this.name}.resource`
+    });
+
+    effect(() => {
+      const context = this.current();
+      if (!context) {
+        routeResource.abort();
+        routeResource.mutate(undefined);
+        return;
+      }
+      if (matcher && !matcher.exec(context.url)) {
+        routeResource.abort();
+        routeResource.mutate(undefined);
+        return;
+      }
+      routeResource.refresh();
+    });
+
+    return routeResource;
+  }
+
+  action<TArgs extends unknown[], TResult, E = unknown>(
+    handler: (context: RouteActionContext | null, ...args: TArgs) => Promise<TResult> | TResult,
+    options: ActionOptions<TResult, E> = {}
+  ): Action<TArgs, TResult, E> {
+    return action<TArgs, TResult, E>((...args) => {
+      const context = this.current.peek();
+      return handler(context ? { ...context, router: this, scope: this.scope } : null, ...args);
+    }, {
+      ...options,
+      name: options.name || `${this.name}.action`
+    });
   }
 
   check(): RouteContext | null {
@@ -2742,6 +3471,12 @@ class Router {
       this.disposeRoute();
       this.activeRoute = route;
       this.current.set(context);
+      emitRuntimeEvent({
+        type: "router:match",
+        timestamp: Date.now(),
+        name: this.name,
+        detail: { pattern: route.pattern, path: context.path, params: context.params }
+      });
       const cleanup = route.handler(params, context);
       if (typeof cleanup === "function") this.routeCleanup = cleanup;
       return context;
@@ -2755,6 +3490,12 @@ class Router {
       params: {},
       query: searchParamsToObject(url.search),
       hash: searchParamsToObject(url.hash)
+    });
+    emitRuntimeEvent({
+      type: "router:not-found",
+      timestamp: Date.now(),
+      name: this.name,
+      detail: { path: routePath || "/" }
     });
     if (typeof cleanup === "function") this.routeCleanup = cleanup;
     return null;
@@ -2941,9 +3682,11 @@ function route(pattern: string, handler: RouteHandler): Router {
 }
 
 const Ity = {
-  version: "2.2.0",
+  version: "3.0.0",
   createConfig,
   configure,
+  createScope,
+  observeRuntime,
   signal,
   computed,
   effect,
@@ -2957,8 +3700,10 @@ const Ity = {
   form,
   formState,
   html,
+  repeat,
   unsafeHTML,
   render,
+  hydrate,
   renderToString,
   component,
   route,
@@ -3000,14 +3745,18 @@ export {
   component,
   configure,
   createConfig,
+  createScope,
   computed,
   effect,
   action,
   form,
   formState,
+  hydrate,
   html,
   isSignal,
+  observeRuntime,
   onDOMReady,
+  repeat,
   render,
   renderToString,
   resource,
@@ -3022,6 +3771,7 @@ export type {
   Action,
   ActionOptions,
   AsyncStatus,
+  Cleanup,
   ComponentContext,
   ComponentOptions,
   EffectHandle,
@@ -3041,11 +3791,20 @@ export type {
   Resource,
   ResourceContext,
   ResourceOptions,
+  RouteActionContext,
   RouteContext,
   RouteHandler,
+  RouteResourceContext,
+  RepeatResult,
   Signal,
+  ScopeKey,
+  ScopeOptions,
   Store,
   TemplateResult,
+  RuntimeEvent,
+  RuntimeObserver,
+  RuntimeWarning,
+  ItyScope,
   UnsafeHTMLOptions
 };
 export default Ity;

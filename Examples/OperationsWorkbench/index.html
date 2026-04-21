@@ -537,22 +537,29 @@
   <body>
     <div id="operationsWorkbenchApp"></div>
 
-    <script src="../../dist/ity.js"></script>
     <script src="../../build/Examples/OperationsWorkbench/operationsWorkbenchApp.js"></script>
-    <script>
-      (function () {
-        var createApp = window.ItyExamples && window.ItyExamples.createOperationsWorkbenchApp;
-        if (!window.Ity || !createApp) {
-          document.getElementById('operationsWorkbenchApp').innerHTML =
-            '<p style="font-family: Avenir Next, Segoe UI, sans-serif; padding: 1rem;">Build the repository first with <code>npm run build</code>, then reload this page.</p>';
-          return;
-        }
-        createApp(window.Ity, {
+    <script type="module">
+      import * as Ity from '../../dist/ity.esm.mjs';
+      import { createQueryClient, query, mutation } from '../../dist/query.esm.mjs';
+      import { createFormKit } from '../../dist/forms.esm.mjs';
+
+      const createApp = window.ItyExamples && window.ItyExamples.createOperationsWorkbenchApp;
+      if (!createApp) {
+        document.getElementById('operationsWorkbenchApp').innerHTML =
+          '<p style="font-family: Avenir Next, Segoe UI, sans-serif; padding: 1rem;">Build the repository first with <code>npm run build</code>, then reload this page.</p>';
+      } else {
+        createApp(Ity, {
           target: '#operationsWorkbenchApp',
           base: window.location.pathname.replace(/\/index\.html$/, '').replace(/\/+$/, ''),
-          storageKey: 'ity-operations-workbench'
+          storageKey: 'ity-operations-workbench',
+          modules: {
+            createQueryClient,
+            query,
+            mutation,
+            createFormKit
+          }
         });
-      })();
+      }
     </script>
   </body>
 </html>

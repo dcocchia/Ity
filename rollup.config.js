@@ -24,6 +24,49 @@ function transpileTypeScript() {
   };
 }
 
+function moduleBuild(name, input, external = []) {
+  const isCoreExternal = (id) => id === './Ity' || /[/\\]Ity(\.ts)?$/.test(id);
+  return {
+    input,
+    external(id) {
+      return isCoreExternal(id) || external.includes(id);
+    },
+    plugins: [transpileTypeScript()],
+    output: [
+      {
+        file: `dist/${name}.cjs.js`,
+        format: 'cjs',
+        exports: 'named',
+        sourcemap: true,
+        paths(id) {
+          if (isCoreExternal(id)) return './ity.cjs.js';
+          return id;
+        }
+      },
+      {
+        file: `dist/${name}.esm.mjs`,
+        format: 'es',
+        sourcemap: true,
+        paths(id) {
+          if (isCoreExternal(id)) return './ity.esm.mjs';
+          return id;
+        }
+      }
+    ]
+  };
+}
+
+function dtsBuild(name) {
+  return {
+    input: `types/${name}.d.ts`,
+    plugins: [dts()],
+    output: {
+      file: `dist/${name}.d.ts`,
+      format: 'es'
+    }
+  };
+}
+
 module.exports = [
   {
     input: 'Ity.ts',
@@ -46,12 +89,11 @@ module.exports = [
       sourcemap: true
     }
   },
-  {
-    input: 'types/Ity.d.ts',
-    plugins: [dts()],
-    output: {
-      file: 'dist/ity.d.ts',
-      format: 'es'
-    }
-  }
+  moduleBuild('query', 'query.ts', ['./Ity']),
+  moduleBuild('forms', 'forms.ts', ['./Ity']),
+  moduleBuild('react', 'react.ts', ['./Ity', 'react']),
+  dtsBuild('Ity'),
+  dtsBuild('query'),
+  dtsBuild('forms'),
+  dtsBuild('react')
 ];
