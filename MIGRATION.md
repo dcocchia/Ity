@@ -1,13 +1,13 @@
 # Ity Migration Guide
 
-This guide covers upgrading older Ity applications to Ity 2.1.0.
+This guide covers upgrading older Ity applications to Ity 2.2.0.
 
 Ity 2 keeps the original goal of a tiny dependency-free browser app library, but the primary programming model is now reactive and platform-native. The V1 MVC classes still ship for compatibility, so migration can be incremental instead of a rewrite.
 
 ## Install
 
 ```bash
-npm install ity@^2.1.0
+npm install ity@^2.2.0
 ```
 
 ```ts
@@ -23,7 +23,7 @@ Browser builds remain available through `dist/ity.js` and `dist/ity.min.js`.
 - Dynamic template values are text-safe by default. HTML string parsing must be explicit through `unsafeHTML`.
 - Components are native custom elements through `component()`.
 - Routing is handled by `Router` and `route()`, with base-path support, route cleanup, same-origin link interception, and URLPattern fallback.
-- Async UI state can use `resource`, `action`, and `form`.
+- Async UI state can use `resource`, `action`, `form`, and `formState`.
 - V1 `Application`, `Model`, `Collection`, `View`, and `SelectorObject` remain available.
 
 ## V1 MVC To V2 Reactivity
@@ -88,7 +88,7 @@ delete state.user;
 const snapshot = state.$snapshot();
 ```
 
-In 2.1.0, `store` tracks structural changes. Effects and subscribers that read snapshots are notified when keys are added or deleted, not just when existing values change.
+In 2.1+, `store` tracks structural changes. Effects and subscribers that read snapshots are notified when keys are added or deleted, not just when existing values change.
 
 ## Template Safety
 
@@ -113,18 +113,23 @@ Ity.html`<article>${Ity.unsafeHTML(trustedHtml)}</article>`;
 If your app accepts rich text from users, configure a sanitizer at the trust boundary:
 
 ```ts
-Ity.configure({
+const htmlPolicy = Ity.createConfig({
   sanitizeHTML(value) {
     return DOMPurify.sanitize(value);
   }
 });
+
+Ity.render(view, "#app", { config: htmlPolicy });
 ```
 
-Per-call sanitizers override the global sanitizer:
+Per-call sanitizers override any scoped or global sanitizer:
 
 ```ts
 Ity.unsafeHTML(value, { sanitize: customSanitize });
 ```
+
+`Ity.configure({ sanitizeHTML })` still exists for process-wide setup, but
+`createConfig()` is the better fit for multi-app pages, tests, and SSR.
 
 Ity does not bundle a sanitizer because sanitizer policy is application-specific and many projects already standardize on one.
 
@@ -182,6 +187,41 @@ Ity.render(() => Ity.html`
 `, "#app");
 ```
 
+Use `formState` when the form needs field binding, validation, dirty tracking,
+or named draft state:
+
+```ts
+const draft = Ity.formState({
+  title: "",
+  ownerId: "ava",
+  urgent: false
+}, {
+  validators: {
+    title(value) {
+      return value.trim() ? null : "Title is required.";
+    }
+  }
+});
+
+const save = draft.submit(async (values) => {
+  return fetch("/tasks", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(values)
+  });
+});
+
+Ity.render(() => Ity.html`
+  <form @submit=${save.handleSubmit}>
+    <input bind=${draft.bind("title", { name: "taskTitle" })}>
+    <select bind=${draft.bind("ownerId", { type: "select" })}></select>
+  </form>
+`, "#app");
+```
+
+`action.run()`, `action.with()`, `action.from()`, and `form.handleSubmit()` are
+also new in 2.2.0 for direct DOM event wiring without unhandled rejections.
+
 ## Router Migration
 
 V2 routing uses explicit route registration:
@@ -200,13 +240,15 @@ router.add("/users/:id", (params, ctx) => {
 
 Route handlers may return a cleanup function. The cleanup runs before the next route, when the active route is removed, and when the router stops.
 
-Links opt into client-side navigation with `data-ity-link`:
+Links can now opt into router-managed navigation with `router.link()`:
 
-```html
-<a data-ity-link href="/app/users/42">User 42</a>
+```ts
+Ity.html`<a bind=${router.link("/users/42")}>User 42</a>`;
 ```
 
-`Router` only intercepts same-origin URLs inside its configured base path.
+Plain same-origin anchors inside the router base path are still intercepted at
+the document level. `router.link()` is the better fit for templates, base-path
+authoring, and shadow DOM.
 
 ## Components
 
@@ -231,9 +273,22 @@ Ity.component("user-card", {
 
 Component render effects and `ctx.effect()` handlers are disposed when the element disconnects and restarted when it reconnects. This prevents stale subscriptions while preserving component state.
 
+In 2.2.0, components can also declare structured props:
+
+```ts
+Ity.component("user-card", {
+  props: ["user"],
+  shadow: true,
+  setup(ctx) {
+    const user = ctx.prop<{ name: string }>("user");
+    return () => Ity.html`<h2>${user()?.name || "Unknown"}</h2>`;
+  }
+});
+```
+
 ## Packaging Notes
 
-Ity 2.1.0 publishes:
+Ity 2.2.0 publishes:
 
 - ESM: `dist/ity.esm.mjs` and `dist/ity.esm.js`.
 - CommonJS: `dist/ity.cjs.js`.
@@ -245,8 +300,9 @@ The package `exports` map supports ESM, CommonJS, browser-aware bundlers, and `i
 
 ## Recommended Upgrade Path
 
-1. Upgrade to Ity 2.1.0 and run the existing test suite without changing application code.
+1. Upgrade to Ity 2.2.0 and run the existing test suite without changing application code.
 2. Replace manual HTML string rendering with `html` templates at active maintenance boundaries.
 3. Introduce signals for new state and bridge old models through their `state` signals.
-4. Move async screens to `resource`, submit handlers to `action`, and forms to `form`.
-5. Convert route entry points to return cleanup functions, especially if they mount renders, subscribe to signals, or start network work.
+4. Move async screens to `resource`, submit handlers to `action`, and complex forms to `formState`.
+5. Convert route links to `router.link()` where base paths or shadow DOM are involved.
+6. Convert route entry points to return cleanup functions, especially if they mount renders, subscribe to signals, or start network work.

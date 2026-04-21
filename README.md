@@ -24,24 +24,25 @@ still included as a compatibility layer.
 * V1-compatible `Model`, `Collection`, `View`, `Application`, and
   `SelectorObject`.
 
-## What's New In 2.1.0
+## What's New In 2.2.0
 
-Ity 2.1.0 consolidates the next production layer on top of the V2 kernel:
+Ity 2.2.0 turns the V2 kernel into a more complete application layer:
 
-* `resource()` for cancellable async reads with loading, error, status, refresh,
-  abort, and optimistic mutation state.
-* `action()` for async mutations with pending counts, success/error state, and a
-  callable submit API.
-* `form()` for progressive form submission with `FormData`, reset-on-success,
-  and the same state model as actions.
-* `configure({ sanitizeHTML })` and per-call `unsafeHTML(..., { sanitize })`
-  hooks for application-owned HTML sanitization.
-* Structural store reactivity, so snapshot subscribers rerun when keys are added
-  or deleted.
-* Router base-path handling and route/not-found cleanup semantics.
-* Reconnect-safe component render effects and `ctx.effect()` lifecycles.
-* Package export refinements for ESM, CommonJS, browser bundles, and
-  TypeScript declarations.
+* `formState()` for field binding, dirty/touched tracking, validation, reset,
+  and validated submits.
+* `createConfig()` plus scoped `render(..., { config })` and
+  `renderToString(..., { config })` so HTML sanitization can be app-local instead
+  of global-only.
+* `action.run()`, `action.with()`, `action.from()`, and `form.handleSubmit()`
+  for safer direct DOM event wiring.
+* `component()` props with `ctx.prop(name)` so custom elements can consume rich
+  structured inputs, not just attributes.
+* `router.link(path)` as a full bindable link object with base-aware `href` and
+  click handling that also works inside shadow DOM.
+* Form submits now synchronize the current form controls before validation, so
+  programmatic fills and restored browser values do not drift from form state.
+* A first-class examples runner via `npm run examples:serve` and a new
+  [Examples/index.html](Examples/index.html) launcher.
 
 ## Installation
 
@@ -55,6 +56,23 @@ import Ity, { signal, computed, html, render } from "ity";
 
 The package ships ESM, CommonJS, browser IIFE, minified IIFE, source maps, and
 TypeScript declarations.
+
+## Examples
+
+The repository includes small focused demos plus a deeper production-style app:
+
+* [Examples/index.html](Examples/index.html)
+* [Examples/Calculator/index.html](Examples/Calculator/index.html)
+* [Examples/Collection/index.html](Examples/Collection/index.html)
+* [Examples/Router/index.html](Examples/Router/index.html)
+* [Examples/OperationsWorkbench/index.html](Examples/OperationsWorkbench/index.html): a local-first operations application that exercises `resource`, `action`, `formState`, `store`, `Router`, `component`, `unsafeHTML`, and `renderToString` together.
+
+Run them locally with:
+
+```bash
+npm install
+npm run examples:serve
+```
 
 ## Quick Start
 
@@ -199,8 +217,8 @@ Ity.render(() => Ity.html`
 `, "#app");
 ```
 
-Actions expose `data`, `error`, `pending`, `pendingCount`, `status`, `submit()`,
-and `reset()`.
+Actions expose `data`, `error`, `pending`, `pendingCount`, `status`,
+`submit()`, `run()`, `with()`, `from()`, and `reset()`.
 
 ### `form`
 
@@ -224,6 +242,51 @@ Ity.render(() => Ity.html`
   </form>
 `, "#app");
 ```
+
+For direct DOM event wiring that should stay inside the controller error model,
+prefer `signup.handleSubmit` over `signup.onSubmit`.
+
+### `formState`
+
+`formState()` adds field-level state on top of native forms.
+
+```ts
+const draft = Ity.formState({
+  title: "",
+  ownerId: "ava",
+  urgent: false
+}, {
+  validators: {
+    title(value) {
+      return value.trim() ? null : "Title is required.";
+    }
+  }
+});
+
+const saveDraft = draft.submit(async (values) => {
+  return fetch("/tasks", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(values)
+  });
+});
+
+Ity.render(() => Ity.html`
+  <form @submit=${saveDraft.handleSubmit}>
+    <input bind=${draft.bind("title", { name: "taskTitle" })}>
+    <select bind=${draft.bind("ownerId", { type: "select" })}></select>
+    <label>
+      <input type="checkbox" bind=${draft.bind("urgent", { type: "checkbox" })}>
+      Urgent
+    </label>
+    ${draft.errors.title && Ity.html`<p role="alert">${draft.errors.title}</p>`}
+  </form>
+`, "#app");
+```
+
+`formState()` exposes `values`, `initialValues`, `errors`, `touched`, `dirty`,
+`valid`, `field(name)`, `bind(name)`, `set()`, `reset()`, `validate()`,
+`markTouched()`, and `submit()`.
 
 ## HTML Templates
 
@@ -266,20 +329,25 @@ Only pass trusted content to `unsafeHTML`. If your application allows rich HTML
 from a less trusted source, wire in your sanitizer:
 
 ```ts
-Ity.configure({
+const htmlPolicy = Ity.createConfig({
   sanitizeHTML(value) {
     return DOMPurify.sanitize(value);
   }
 });
 
-Ity.html`<article>${Ity.unsafeHTML(userProvidedHtml)}</article>`;
+Ity.render(() => Ity.html`
+  <article>${Ity.unsafeHTML(userProvidedHtml)}</article>
+`, "#app", { config: htmlPolicy });
 ```
 
-You can also sanitize one boundary without changing global configuration:
+You can still sanitize one boundary without changing configuration:
 
 ```ts
 Ity.unsafeHTML(markdownHtml, { sanitize: sanitizeMarkdownOutput });
 ```
+
+`Ity.configure({ sanitizeHTML })` still exists for process-wide setup, but
+`createConfig()` is the better fit for multi-app pages, tests, and SSR.
 
 Ity does not bundle a sanitizer. Sanitization policy depends on the content
 source and threat model, and most production apps already standardize that
@@ -347,9 +415,23 @@ Component context:
 * `ctx.host`: the custom element instance.
 * `ctx.root`: the shadow root or host render root.
 * `ctx.attr(name)`: a signal for an observed attribute.
+* `ctx.prop(name)`: a signal for a declared component property.
 * `ctx.emit(name, detail, options)`: dispatch a composed bubbling custom event.
 * `ctx.effect(fn)`: an effect that is disposed on disconnect.
 * `ctx.onConnected(fn)` and `ctx.onDisconnected(fn)`: lifecycle hooks.
+
+Structured props are declared with `props`:
+
+```ts
+Ity.component("user-card", {
+  props: ["user"],
+  shadow: true,
+  setup(ctx) {
+    const user = ctx.prop<{ name: string }>("user");
+    return () => Ity.html`<h2>${user()?.name || "Unknown"}</h2>`;
+  }
+});
+```
 
 If a tag has already been defined, `component()` returns the existing
 constructor instead of throwing.
@@ -376,13 +458,24 @@ The router:
 * Falls back to a small internal matcher for `:param` and `*` segments.
 * Parses query and hash params.
 * Exposes `router.current` as a signal.
-* Handles same-origin links matching `a[data-ity-link]`.
+* Intercepts same-origin in-base links from the document and composes bindable
+  links with `router.link(path)`.
 * Honors `base` for matching, navigation, link interception, and Navigation API
   events.
 * Intercepts same-origin Navigation API events when the API is available.
 * Supports `navigate(path, { replace, transition })`.
+* Supports `href(path)` and `link(path, attrs)` helpers for template authoring.
 * Supports `start()` and `stop()`.
 * Runs cleanup functions returned from route and `notFound` handlers.
+
+`router.link()` is the preferred way to author links in templates and custom
+elements:
+
+```ts
+const router = new Ity.Router({ base: "/app" });
+
+Ity.html`<a bind=${router.link("/users/42")}>User 42</a>`;
+```
 
 Route cleanup is useful when a route mounts a render effect, starts a
 subscription, or owns async work:
@@ -493,7 +586,7 @@ dist-bundle tests, and `npm pack --dry-run` on Node 20 and Node 22.
 
 ## Migration
 
-See [MIGRATION.md](./MIGRATION.md) for the full V1-to-V2 and 2.1.0 migration
+See [MIGRATION.md](./MIGRATION.md) for the full V1-to-V2 and 2.2.0 migration
 guide.
 
 ## Browser Support

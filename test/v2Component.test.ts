@@ -168,4 +168,30 @@ describe('V2 components', function () {
     assert.strictEqual(first, second);
     cleanup();
   });
+
+  it('supports declared property signals for structured component inputs', function () {
+    const cleanup = setupDOM('<!DOCTYPE html><main id="root"></main>');
+    const tag = 'ity-v2-props-a';
+
+    window.Ity.component(tag, {
+      props: ['task'],
+      shadow: true,
+      setup(ctx: any) {
+        const taskValue = ctx.prop('task');
+        return () => window.Ity.html`<p>${taskValue().title} · ${taskValue().status}</p>`;
+      }
+    });
+
+    const el: any = document.createElement(tag);
+    el.task = { title: 'Launch dry run', status: 'planned' };
+    document.getElementById('root').appendChild(el);
+
+    assert.deepStrictEqual(el.task, { title: 'Launch dry run', status: 'planned' });
+    assert.strictEqual(el.shadowRoot?.textContent?.trim(), 'Launch dry run · planned');
+
+    el.task = { title: 'Launch dry run', status: 'active' };
+    assert.deepStrictEqual(el.task, { title: 'Launch dry run', status: 'active' });
+    assert.strictEqual(el.shadowRoot?.textContent?.trim(), 'Launch dry run · active');
+    cleanup();
+  });
 });

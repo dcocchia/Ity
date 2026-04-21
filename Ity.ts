@@ -1,4 +1,4 @@
-// Ity.ts 2.1.0
+// Ity.ts 2.2.0
 // (c) 2026 Dominic Cocchiarella
 // Tiny dependency-free reactive app kernel with V1 MVC compatibility.
 declare var define: any;
@@ -72,6 +72,7 @@ type HTMLSanitizer = (value: string) => string;
 
 interface UnsafeHTMLOptions {
   sanitize?: HTMLSanitizer;
+  config?: ItyConfig | null;
 }
 
 interface ItyConfig {
@@ -81,6 +82,7 @@ interface ItyConfig {
 interface RenderOptions {
   reactive?: boolean;
   transition?: boolean;
+  config?: ItyConfig | null;
 }
 
 type StoreKey = string | symbol;
@@ -128,6 +130,9 @@ interface ActionOptions<TResult, E = unknown> {
 interface Action<TArgs extends unknown[], TResult, E = unknown> {
   (...args: TArgs): Promise<TResult>;
   submit(...args: TArgs): Promise<TResult>;
+  run(...args: TArgs): void;
+  with(...args: TArgs): (...eventArgs: unknown[]) => void;
+  from<TEvent = Event>(mapper: (event: TEvent) => TArgs): (event: TEvent) => void;
   readonly data: Signal<TResult | undefined>;
   readonly error: Signal<E | null>;
   readonly pending: ReadonlySignal<boolean>;
@@ -143,6 +148,7 @@ interface FormController<TResult, E = unknown> {
   readonly pending: ReadonlySignal<boolean>;
   readonly status: ReadonlySignal<AsyncStatus>;
   onSubmit(event: Event): Promise<TResult>;
+  handleSubmit(event: Event): void;
   reset(): void;
 }
 
@@ -150,11 +156,84 @@ interface FormOptions<TResult, E = unknown> extends ActionOptions<TResult, E> {
   resetOnSuccess?: boolean;
 }
 
+type FormErrorMap<TValues extends Record<string, any>> = Partial<Record<Extract<keyof TValues, string>, string>>;
+
+interface FormBindOptions<T> {
+  type?: "text" | "textarea" | "select" | "select-multiple" | "checkbox" | "radio" | "number";
+  event?: string;
+  name?: string;
+  value?: unknown;
+  parse?: (value: unknown, event: Event) => T;
+  format?: (value: T) => unknown;
+}
+
+interface FormStateOptions<TValues extends Record<string, any>> {
+  validators?: Partial<{ [K in keyof TValues]: (value: TValues[K], values: TValues) => string | null | undefined }>;
+  validate?: (values: TValues) => FormErrorMap<TValues> | void;
+}
+
+interface FormField<T> {
+  readonly value: Signal<T>;
+  readonly error: ReadonlySignal<string | null>;
+  readonly touched: ReadonlySignal<boolean>;
+  readonly dirty: ReadonlySignal<boolean>;
+  bind(options?: FormBindOptions<T>): Record<string, unknown>;
+  set(next: T | ((previous: T) => T)): T;
+  reset(): void;
+}
+
+interface FormStateSubmitOptions<TResult, E = unknown> extends ActionOptions<TResult, E> {
+  resetOnSuccess?: boolean;
+}
+
+interface FormStateController<TValues extends Record<string, any>, TResult, E = unknown> {
+  readonly state: FormState<TValues>;
+  readonly action: Action<[TValues, Event], TResult, E>;
+  readonly data: Signal<TResult | undefined>;
+  readonly error: Signal<E | null>;
+  readonly pending: ReadonlySignal<boolean>;
+  readonly status: ReadonlySignal<AsyncStatus>;
+  onSubmit(event: Event): Promise<TResult | undefined>;
+  handleSubmit(event: Event): void;
+  reset(): void;
+}
+
+interface FormState<TValues extends Record<string, any>> {
+  readonly values: Store<TValues>;
+  readonly initialValues: ReadonlySignal<TValues>;
+  readonly errors: Store<FormErrorMap<TValues>>;
+  readonly touched: Store<Partial<Record<Extract<keyof TValues, string>, boolean>>>;
+  readonly dirty: ReadonlySignal<boolean>;
+  readonly valid: ReadonlySignal<boolean>;
+  field<K extends keyof TValues>(name: K): FormField<TValues[K]>;
+  bind<K extends keyof TValues>(name: K, options?: FormBindOptions<TValues[K]>): Record<string, unknown>;
+  set(next: Partial<TValues> | ((current: TValues) => Partial<TValues> | void)): void;
+  reset(next?: Partial<TValues> | TValues): void;
+  validate(names?: readonly (keyof TValues)[]): boolean;
+  markTouched(names?: readonly (keyof TValues)[]): void;
+  submit<TResult, E = unknown>(
+    handler: (values: TValues, event: Event) => Promise<TResult> | TResult,
+    options?: FormStateSubmitOptions<TResult, E>
+  ): FormStateController<TValues, TResult, E>;
+}
+
+interface RenderToStringOptions {
+  config?: ItyConfig | null;
+}
+
+interface RegisteredFormBinding<T> {
+  domName: string;
+  type: NonNullable<FormBindOptions<T>["type"]> | "text";
+  value?: unknown;
+  parse?: (value: unknown, event: Event) => T;
+}
+
 const defaultEquals = Object.is;
 let activeObserver: ReactiveObserver | null = null;
 let batchDepth = 0;
 const pendingEffects = new Set<ReactiveEffect>();
 let configuredSanitizeHTML: HTMLSanitizer | undefined;
+const activeConfigStack: Array<ItyConfig | null> = [];
 
 function getWindow(): (Window & typeof globalThis) | undefined {
   return typeof window !== "undefined" ? window : undefined;
@@ -163,6 +242,74 @@ function getWindow(): (Window & typeof globalThis) | undefined {
 function getDocument(): Document | undefined {
   const win = getWindow();
   return win?.document ?? (typeof document !== "undefined" ? document : undefined);
+}
+
+function hasOwn(target: object, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(target, key);
+}
+
+function isPlainObject(value: unknown): value is Record<string, any> {
+  if (!value || typeof value !== "object") return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function cloneValue<T>(value: T): T {
+  const cloneFn = (globalThis as any).structuredClone;
+  if (typeof cloneFn === "function") return cloneFn(value);
+  if (Array.isArray(value)) return value.map((item) => cloneValue(item)) as T;
+  if (isPlainObject(value)) {
+    const out: Record<string, any> = {};
+    for (const key of Reflect.ownKeys(value)) {
+      out[key as any] = cloneValue((value as any)[key]);
+    }
+    return out as T;
+  }
+  return value;
+}
+
+function deepEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    if (left.length !== right.length) return false;
+    for (let i = 0; i < left.length; i += 1) {
+      if (!deepEqual(left[i], right[i])) return false;
+    }
+    return true;
+  }
+  if (isPlainObject(left) && isPlainObject(right)) {
+    const leftKeys = Reflect.ownKeys(left);
+    const rightKeys = Reflect.ownKeys(right);
+    if (leftKeys.length !== rightKeys.length) return false;
+    for (const key of leftKeys) {
+      if (!rightKeys.includes(key)) return false;
+      if (!deepEqual((left as any)[key], (right as any)[key])) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+function currentConfig(): ItyConfig | null {
+  return activeConfigStack.length ? activeConfigStack[activeConfigStack.length - 1] : null;
+}
+
+function withConfig<T>(config: ItyConfig | null | undefined, callback: () => T): T {
+  activeConfigStack.push(config || null);
+  try {
+    return callback();
+  } finally {
+    activeConfigStack.pop();
+  }
+}
+
+function resolveSanitizeHTML(options: UnsafeHTMLOptions = {}): HTMLSanitizer | undefined {
+  if (options.sanitize) return options.sanitize;
+  const scoped = options.config ?? currentConfig();
+  if (scoped && hasOwn(scoped, "sanitizeHTML")) {
+    return scoped.sanitizeHTML || undefined;
+  }
+  return configuredSanitizeHTML;
 }
 
 function trackDependency(source: ReactiveSource): void {
@@ -410,6 +557,12 @@ function configure(options: ItyConfig = {}): void {
   configuredSanitizeHTML = options.sanitizeHTML || undefined;
 }
 
+function createConfig(options: ItyConfig = {}): ItyConfig {
+  const config: ItyConfig = {};
+  if (hasOwn(options, "sanitizeHTML")) config.sanitizeHTML = options.sanitizeHTML ?? null;
+  return config;
+}
+
 function store<T extends Record<StoreKey, any>>(initialValue: T): Store<T> {
   const keys = new Set<StoreKey>(Reflect.ownKeys(initialValue));
   const signals = new Map<StoreKey, Signal<any>>();
@@ -644,6 +797,9 @@ function action<TArgs extends unknown[], TResult, E = unknown>(
   const callable = ((...args: TArgs) => submit(...args)) as Action<TArgs, TResult, E>;
   const mutableCallable = callable as Action<TArgs, TResult, E> & {
     submit: (...args: TArgs) => Promise<TResult>;
+    run: (...args: TArgs) => void;
+    with: (...args: TArgs) => (...eventArgs: unknown[]) => void;
+    from: <TEvent = Event>(mapper: (event: TEvent) => TArgs) => (event: TEvent) => void;
     data: Signal<TResult | undefined>;
     error: Signal<E | null>;
     pending: ReadonlySignal<boolean>;
@@ -651,6 +807,19 @@ function action<TArgs extends unknown[], TResult, E = unknown>(
     status: ReadonlySignal<AsyncStatus>;
   };
   mutableCallable.submit = submit;
+  mutableCallable.run = (...args: TArgs) => {
+    submit(...args).catch(() => undefined);
+  };
+  mutableCallable.with = (...args: TArgs) => {
+    return () => {
+      mutableCallable.run(...args);
+    };
+  };
+  mutableCallable.from = <TEvent = Event>(mapper: (event: TEvent) => TArgs) => {
+    return (event: TEvent) => {
+      mutableCallable.run(...mapper(event));
+    };
+  };
   mutableCallable.data = data;
   mutableCallable.error = error;
   mutableCallable.pending = pending;
@@ -666,38 +835,48 @@ function action<TArgs extends unknown[], TResult, E = unknown>(
   return callable;
 }
 
+function getFormElementCtor(node: Element | null): typeof HTMLFormElement | undefined {
+  const ownerWindow = node?.ownerDocument?.defaultView as (Window & typeof globalThis) | null | undefined;
+  return ownerWindow?.HTMLFormElement
+    || getWindow()?.HTMLFormElement
+    || (typeof HTMLFormElement !== "undefined" ? HTMLFormElement : undefined);
+}
+
+function isFormElement(node: Element | null | undefined, fallbackNode?: Element | null): node is HTMLFormElement {
+  const FormElement = node ? getFormElementCtor(node) : getFormElementCtor(fallbackNode || null);
+  return Boolean(node && FormElement && node instanceof FormElement);
+}
+
+function findFormElement(event: Event): HTMLFormElement {
+  const target = (event.currentTarget || event.target) as Element | null;
+  if (!getFormElementCtor(target)) throw new Error("Ity.form requires HTMLFormElement support");
+  if (isFormElement(target, target)) return target;
+  const closest = target?.closest?.("form");
+  if (isFormElement(closest, target)) return closest;
+  throw new Error("Ity.form onSubmit requires a form event target");
+}
+
+function createFormDataForElement(formElement: HTMLFormElement): FormData {
+  const ownerWindow = formElement.ownerDocument?.defaultView as (Window & typeof globalThis) | null | undefined;
+  const FormDataCtor = ownerWindow?.FormData
+    || getWindow()?.FormData
+    || (typeof FormData !== "undefined" ? FormData : undefined);
+  if (!FormDataCtor) throw new Error("Ity.form requires FormData support");
+  return new FormDataCtor(formElement);
+}
+
 function form<TResult, E = unknown>(
   handler: (data: FormData, event: Event) => Promise<TResult> | TResult,
   options: FormOptions<TResult, E> = {}
 ): FormController<TResult, E> {
   const submitAction = action<[FormData, Event], TResult, E>(handler, options);
 
-  const findForm = (event: Event): HTMLFormElement => {
-    const target = (event.currentTarget || event.target) as Element | null;
-    const getFormElementCtor = (node: Element | null): typeof HTMLFormElement | undefined => {
-      const ownerWindow = node?.ownerDocument?.defaultView as (Window & typeof globalThis) | null | undefined;
-      return ownerWindow?.HTMLFormElement
-        || getWindow()?.HTMLFormElement
-        || (typeof HTMLFormElement !== "undefined" ? HTMLFormElement : undefined);
-    };
-    const isFormElement = (node: Element | null | undefined): node is HTMLFormElement => {
-      const FormElement = node ? getFormElementCtor(node) : getFormElementCtor(target);
-      return Boolean(node && FormElement && node instanceof FormElement);
-    };
-    if (!getFormElementCtor(target)) throw new Error("Ity.form requires HTMLFormElement support");
-    if (isFormElement(target)) return target;
-    const closest = target?.closest?.("form");
-    if (isFormElement(closest)) return closest;
-    throw new Error("Ity.form onSubmit requires a form event target");
-  };
-
-  const createFormData = (formElement: HTMLFormElement): FormData => {
-    const ownerWindow = formElement.ownerDocument?.defaultView as (Window & typeof globalThis) | null | undefined;
-    const FormDataCtor = ownerWindow?.FormData
-      || getWindow()?.FormData
-      || (typeof FormData !== "undefined" ? FormData : undefined);
-    if (!FormDataCtor) throw new Error("Ity.form requires FormData support");
-    return new FormDataCtor(formElement);
+  const onSubmit = async (event: Event): Promise<TResult> => {
+    event.preventDefault();
+    const formElement = findFormElement(event);
+    const result = await submitAction(createFormDataForElement(formElement), event);
+    if (options.resetOnSuccess) formElement.reset();
+    return result;
   };
 
   return {
@@ -706,17 +885,379 @@ function form<TResult, E = unknown>(
     error: submitAction.error,
     pending: submitAction.pending,
     status: submitAction.status,
-    async onSubmit(event: Event): Promise<TResult> {
-      event.preventDefault();
-      const formElement = findForm(event);
-      const result = await submitAction(createFormData(formElement), event);
-      if (options.resetOnSuccess) formElement.reset();
-      return result;
+    onSubmit,
+    handleSubmit(event: Event): void {
+      onSubmit(event).catch(() => undefined);
     },
     reset() {
       submitAction.reset();
     }
   };
+}
+
+function replaceStoreSnapshot<T extends Record<string, any>>(target: Store<T>, nextValue: Partial<T>): void {
+  const current = target.$snapshot() as Record<string, any>;
+  batch(() => {
+    for (const key of Reflect.ownKeys(current)) {
+      if (!hasOwn(nextValue as object, key)) delete (target as any)[key];
+    }
+    for (const key of Reflect.ownKeys(nextValue)) {
+      (target as any)[key] = (nextValue as any)[key];
+    }
+  });
+}
+
+function formState<TValues extends Record<string, any>>(
+  initialValue: TValues,
+  options: FormStateOptions<TValues> = {}
+): FormState<TValues> {
+  const values = store(cloneValue(initialValue));
+  const initialValues = signal(cloneValue(initialValue));
+  const errors = store({} as FormErrorMap<TValues>);
+  const touched = store({} as Partial<Record<Extract<keyof TValues, string>, boolean>>);
+  const registeredBindings = new Map<Extract<keyof TValues, string>, Map<string, RegisteredFormBinding<any>>>();
+
+  const allFieldNames = (): Array<Extract<keyof TValues, string>> => {
+    const names = new Set<string>();
+    Reflect.ownKeys(initialValues.peek()).forEach((key) => names.add(String(key)));
+    Reflect.ownKeys(values.$snapshot()).forEach((key) => names.add(String(key)));
+    return Array.from(names) as Array<Extract<keyof TValues, string>>;
+  };
+
+  const computeErrors = (snapshot: TValues): FormErrorMap<TValues> => {
+    const out: FormErrorMap<TValues> = {};
+    const validators = options.validators || {};
+    for (const key of allFieldNames()) {
+      const validator = (validators as any)[key] as ((value: TValues[keyof TValues], values: TValues) => string | null | undefined) | undefined;
+      if (!validator) continue;
+      const message = validator((snapshot as any)[key], snapshot);
+      if (message) out[key] = message;
+    }
+    const formErrors = options.validate?.(snapshot);
+    if (formErrors) {
+      for (const key of Reflect.ownKeys(formErrors)) {
+        const message = (formErrors as any)[key];
+        if (message) (out as any)[key] = message;
+      }
+    }
+    return out;
+  };
+
+  const syncErrors = (): boolean => {
+    const nextErrors = computeErrors(values.$snapshot());
+    replaceStoreSnapshot(errors as any, nextErrors);
+    return Reflect.ownKeys(nextErrors).length === 0;
+  };
+
+  const markTouched = (names?: readonly (keyof TValues)[]): void => {
+    const keys = names?.length
+      ? names.map((name) => String(name))
+      : allFieldNames();
+    batch(() => {
+      for (const key of keys) {
+        (touched as any)[key] = true;
+      }
+    });
+  };
+
+  const maybeValidateTouched = (): void => {
+    const touchedSnapshot = touched.$snapshot();
+    if (Reflect.ownKeys(touchedSnapshot).some((key) => Boolean((touchedSnapshot as any)[key]))) {
+      syncErrors();
+    }
+  };
+
+  const set = (next: Partial<TValues> | ((current: TValues) => Partial<TValues> | void)): void => {
+    values.$patch((current) => {
+      const patch = typeof next === "function" ? next(current) : next;
+      return patch || {};
+    });
+    maybeValidateTouched();
+  };
+
+  const reset = (next?: Partial<TValues> | TValues): void => {
+    const base = cloneValue(next
+      ? { ...initialValues.peek(), ...(next as any) }
+      : initialValues.peek());
+    initialValues.set(cloneValue(base));
+    replaceStoreSnapshot(values as any, base);
+    replaceStoreSnapshot(errors as any, {});
+    replaceStoreSnapshot(touched as any, {});
+  };
+
+  const createFieldSignal = <K extends keyof TValues>(name: K): Signal<TValues[K]> => {
+    const signalLike = function (next?: TValues[K] | ((previous: TValues[K]) => TValues[K])): TValues[K] {
+      if (arguments.length === 0) return (values as any)[name];
+      const previous = (values as any)[name];
+      const resolved = typeof next === "function"
+        ? (next as (previous: TValues[K]) => TValues[K])(previous)
+        : next;
+      (values as any)[name] = resolved;
+      maybeValidateTouched();
+      return resolved as TValues[K];
+    } as Signal<TValues[K]>;
+    signalLike.get = () => (values as any)[name];
+    signalLike.peek = () => untrack(() => (values as any)[name]);
+    signalLike.set = (next) => signalLike(next);
+    signalLike.update = (updater) => signalLike(updater);
+    signalLike.subscribe = (callback, subscribeOptions = {}) => {
+      let first = true;
+      let previous = signalLike.peek();
+      return effect(() => {
+        const current = (values as any)[name];
+        if (first) {
+          first = false;
+          previous = current;
+          if (subscribeOptions.immediate) callback(current, current);
+          return;
+        }
+        if (!Object.is(previous, current)) {
+          const prev = previous;
+          previous = current;
+          callback(current, prev);
+        }
+      });
+    };
+    Object.defineProperty(signalLike, "isSignal", { value: true });
+    return signalLike;
+  };
+
+  const registerBinding = <K extends keyof TValues>(
+    name: K,
+    domName: string,
+    type: RegisteredFormBinding<TValues[K]>["type"],
+    bindOptions: FormBindOptions<TValues[K]>
+  ): void => {
+    const fieldName = String(name) as Extract<keyof TValues, string>;
+    const fieldBindings = registeredBindings.get(fieldName) || new Map<string, RegisteredFormBinding<TValues[K]>>();
+    const signature = `${domName}|${type}|${String(bindOptions.value)}`;
+    fieldBindings.set(signature, {
+      domName,
+      type,
+      value: bindOptions.value,
+      parse: bindOptions.parse
+    });
+    registeredBindings.set(fieldName, fieldBindings as Map<string, RegisteredFormBinding<any>>);
+  };
+
+  const syncFromForm = (event: Event): void => {
+    const NO_FORM_VALUE = Symbol("ity.formState.noValue");
+    let formElement: HTMLFormElement;
+    try {
+      formElement = findFormElement(event);
+    } catch (_error) {
+      return;
+    }
+    const formData = createFormDataForElement(formElement);
+    const controls = Array.from((formElement as any).elements || []) as Array<{ name?: string; value?: string; checked?: boolean }>;
+    const patch: Partial<TValues> = {};
+
+    const resolveControlValue = <K extends keyof TValues>(
+      name: K,
+      bindings: RegisteredFormBinding<TValues[K]>[]
+    ): TValues[K] | typeof NO_FORM_VALUE => {
+      const primary = bindings[0];
+      if (!primary) return NO_FORM_VALUE;
+      const domName = primary.domName;
+      const namedControls = controls.filter((control) => control && control.name === domName);
+      if (primary.parse && namedControls.length) {
+        const parseTarget = primary.type === "radio"
+          ? namedControls.find((control) => Boolean(control.checked)) || namedControls[0]
+          : namedControls[0];
+        return primary.parse(parseTarget, event);
+      }
+      if (primary.type === "checkbox") {
+        const currentValue = (values as any)[name];
+        if (Array.isArray(currentValue) || bindings.some((binding) => binding.value !== undefined) || namedControls.length > 1) {
+          const selected: unknown[] = [];
+          for (const control of namedControls) {
+            if (!control.checked) continue;
+            const matched = bindings.find((binding) => String(binding.value ?? control.value ?? "") === String(control.value ?? ""));
+            selected.push(matched?.value ?? control.value ?? "");
+          }
+          return selected as TValues[K];
+        }
+        return formData.has(domName) as TValues[K];
+      }
+      if (primary.type === "radio") {
+        return (formData.get(domName) ?? (values as any)[name]) as TValues[K];
+      }
+      if (primary.type === "select-multiple") {
+        const select = namedControls[0] as HTMLSelectElement | undefined;
+        if (select?.selectedOptions) {
+          return Array.from(select.selectedOptions).map((option) => option.value) as TValues[K];
+        }
+        return formData.getAll(domName) as TValues[K];
+      }
+      if (primary.type === "number") {
+        const raw = formData.get(domName);
+        return (raw === null || raw === "" ? undefined : Number(raw)) as TValues[K];
+      }
+      const raw = formData.get(domName);
+      return (raw === null ? "" : raw) as TValues[K];
+    };
+
+    for (const fieldName of allFieldNames()) {
+      const bindings = Array.from(registeredBindings.get(fieldName)?.values() || []) as RegisteredFormBinding<TValues[Extract<keyof TValues, string>]>[];
+      const nextValue = resolveControlValue(fieldName, bindings as RegisteredFormBinding<TValues[typeof fieldName]>[]);
+      if (nextValue !== NO_FORM_VALUE) {
+        (patch as any)[fieldName] = nextValue;
+      }
+    }
+
+    if (Reflect.ownKeys(patch).length) {
+      values.$patch(() => patch);
+    }
+  };
+
+  const bind = <K extends keyof TValues>(name: K, bindOptions: FormBindOptions<TValues[K]> = {}): Record<string, unknown> => {
+    const field = api.field(name);
+    const type = bindOptions.type || "text";
+    const eventName = bindOptions.event
+      || (type === "checkbox" || type === "radio" || type === "select" || type === "select-multiple" ? "change" : "input");
+    const domName = bindOptions.name || String(name);
+    registerBinding(name, domName, type, bindOptions);
+    const formattedValue = bindOptions.format ? bindOptions.format(field.value()) : field.value();
+    const parseValue = (event: Event): TValues[K] => {
+      if (bindOptions.parse) {
+        return bindOptions.parse((event.currentTarget || event.target) as unknown, event);
+      }
+      const target = (event.currentTarget || event.target) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
+      if (!target) return field.value();
+      if (type === "checkbox") {
+        if (Array.isArray(field.value())) {
+          const optionValue = bindOptions.value ?? target.value;
+          const current = field.value() as unknown[];
+          return ((target as HTMLInputElement).checked
+            ? Array.from(new Set([...current, optionValue]))
+            : current.filter((item) => !Object.is(item, optionValue))) as TValues[K];
+        }
+        return Boolean((target as HTMLInputElement).checked) as TValues[K];
+      }
+      if (type === "radio") {
+        if (!(target as HTMLInputElement).checked) return field.value();
+        return (bindOptions.value ?? (target as HTMLInputElement).value) as TValues[K];
+      }
+      if (type === "select-multiple") {
+        return Array.from((target as HTMLSelectElement).selectedOptions).map((option) => option.value) as TValues[K];
+      }
+      if (type === "number") {
+        const raw = target.value;
+        return (raw === "" ? (undefined as any) : Number(raw)) as TValues[K];
+      }
+      return target.value as TValues[K];
+    };
+
+    const binding: Record<string, unknown> = {
+      name: domName,
+      [`@${eventName}`]: (event: Event) => {
+        field.set(parseValue(event));
+      },
+      "@blur": () => {
+        markTouched([name]);
+        syncErrors();
+      }
+    };
+
+    if (type === "checkbox") {
+      if (Array.isArray(field.value())) {
+        const optionValue = bindOptions.value;
+        binding.value = optionValue === undefined ? "" : String(optionValue);
+        binding[".checked"] = computed(() => (field.value() as unknown[]).some((item) => Object.is(item, optionValue)));
+      } else {
+        binding[".checked"] = computed(() => Boolean(field.value()));
+        binding.checked = Boolean(field.value());
+      }
+      return binding;
+    }
+
+    if (type === "radio") {
+      const optionValue = bindOptions.value;
+      binding.value = optionValue === undefined ? "" : String(optionValue);
+      binding[".checked"] = computed(() => Object.is(field.value(), optionValue));
+      return binding;
+    }
+
+    if (type === "select-multiple") {
+      binding[".value"] = formattedValue as any;
+      return binding;
+    }
+
+    const stringValue = formattedValue === undefined || formattedValue === null ? "" : String(formattedValue);
+    binding[".value"] = stringValue;
+    binding.value = stringValue;
+    return binding;
+  };
+
+  const api: FormState<TValues> = {
+    values,
+    initialValues,
+    errors,
+    touched,
+    dirty: computed(() => !deepEqual(values.$snapshot(), initialValues())),
+    valid: computed(() => Reflect.ownKeys(errors.$snapshot()).length === 0),
+    field<K extends keyof TValues>(name: K): FormField<TValues[K]> {
+      const valueSignal = createFieldSignal(name);
+      return {
+        value: valueSignal,
+        error: computed(() => (errors as any)[name] || null),
+        touched: computed(() => Boolean((touched as any)[name])),
+        dirty: computed(() => !deepEqual((values as any)[name], (initialValues() as any)[name])),
+        bind(optionsForField?: FormBindOptions<TValues[K]>): Record<string, unknown> {
+          return bind(name, optionsForField);
+        },
+        set(next) {
+          return valueSignal.set(next);
+        },
+        reset() {
+          valueSignal.set((initialValues.peek() as any)[name]);
+          delete (errors as any)[name];
+          delete (touched as any)[name];
+        }
+      };
+    },
+    bind,
+    set,
+    reset,
+    validate(): boolean {
+      return syncErrors();
+    },
+    markTouched,
+    submit<TResult, E = unknown>(
+      handler: (snapshot: TValues, event: Event) => Promise<TResult> | TResult,
+      submitOptions: FormStateSubmitOptions<TResult, E> = {}
+    ): FormStateController<TValues, TResult, E> {
+      const submitAction = action<[TValues, Event], TResult, E>(handler, submitOptions);
+      const onSubmit = async (event: Event): Promise<TResult | undefined> => {
+        event.preventDefault();
+        syncFromForm(event);
+        markTouched();
+        if (!syncErrors()) return undefined;
+        const result = await submitAction(cloneValue(values.$snapshot()), event);
+        if (submitOptions.resetOnSuccess) api.reset();
+        return result;
+      };
+
+      return {
+        state: api,
+        action: submitAction,
+        data: submitAction.data,
+        error: submitAction.error,
+        pending: submitAction.pending,
+        status: submitAction.status,
+        onSubmit,
+        handleSubmit(event: Event): void {
+          onSubmit(event).catch(() => undefined);
+        },
+        reset(): void {
+          submitAction.reset();
+          api.reset();
+        }
+      };
+    }
+  };
+
+  return api;
 }
 
 function html(strings: TemplateStringsArray | readonly string[], ...values: unknown[]): TemplateResult {
@@ -728,7 +1269,7 @@ function html(strings: TemplateStringsArray | readonly string[], ...values: unkn
 }
 
 function unsafeHTML(value: string, options: UnsafeHTMLOptions = {}): UnsafeHTML {
-  const sanitizer = options.sanitize || configuredSanitizeHTML;
+  const sanitizer = resolveSanitizeHTML(options);
   return {
     isUnsafeHTML: true,
     value: sanitizer ? sanitizer(String(value)) : String(value)
@@ -793,6 +1334,13 @@ interface Binding {
   name?: string;
 }
 
+function bindingFromName(rawName: string): Pick<Binding, "kind" | "name"> {
+  const first = rawName[0];
+  const kind = first === "@" ? "event" : first === "." ? "prop" : first === "?" ? "bool" : "attr";
+  const name = kind === "attr" ? rawName : rawName.slice(1);
+  return { kind, name };
+}
+
 function materializeTemplate(result: TemplateResult, doc: Document = documentOrThrow()): DocumentFragment {
   const bindings: Binding[] = [];
   let source = "";
@@ -804,9 +1352,7 @@ function materializeTemplate(result: TemplateResult, doc: Document = documentOrT
       const rawName = attrMatch[1];
       const before = part.slice(0, part.length - attrMatch[0].length);
       const marker = `data-ity-bind-${i}`;
-      const first = rawName[0];
-      const kind = first === "@" ? "event" : first === "." ? "prop" : first === "?" ? "bool" : "attr";
-      const name = kind === "attr" ? rawName : rawName.slice(1);
+      const { kind, name } = bindingFromName(rawName);
       bindings.push({ index: i, kind, name });
       source += `${before}${marker}=""`;
     } else {
@@ -860,6 +1406,15 @@ function applyBindings(root: DocumentFragment, bindings: Binding[], values: read
 
 function applyElementBinding(element: HTMLElement, binding: Binding, value: unknown): void {
   const name = binding.name || "";
+  if (binding.kind === "attr" && name === "bind" && isPlainObject(value)) {
+    for (const key of Reflect.ownKeys(value)) {
+      const entryValue = normalizeValue((value as any)[key]);
+      const entry = bindingFromName(String(key));
+      applyElementBinding(element, { index: binding.index, ...entry }, entryValue);
+    }
+    return;
+  }
+
   if (binding.kind === "event") {
     if (typeof value === "function") {
       element.addEventListener(name, value as EventListener);
@@ -870,6 +1425,13 @@ function applyElementBinding(element: HTMLElement, binding: Binding, value: unkn
   }
 
   if (binding.kind === "prop") {
+    if (name === "value" && Array.isArray(value) && element.tagName === "SELECT" && (element as HTMLSelectElement).multiple) {
+      const selectedValues = new Set(value.map((entry) => String(entry)));
+      Array.from((element as HTMLSelectElement).options).forEach((option) => {
+        option.selected = selectedValues.has(option.value);
+      });
+      return;
+    }
     (element as any)[name] = value;
     return;
   }
@@ -943,10 +1505,12 @@ function render(
 ): Cleanup {
   const mount = resolveTarget(target);
   const update = () => {
-    const value = typeof view === "function" && !isSignal(view)
-      ? (view as () => TemplateValue)()
-      : normalizeValue(view);
-    withViewTransition(() => replaceChildren(mount, valueToFragment(value)), options.transition);
+    withConfig(options.config, () => {
+      const value = typeof view === "function" && !isSignal(view)
+        ? (view as () => TemplateValue)()
+        : normalizeValue(view);
+      withViewTransition(() => replaceChildren(mount, valueToFragment(value)), options.transition);
+    });
   };
 
   if (options.reactive === false) {
@@ -957,11 +1521,13 @@ function render(
   return effect(update);
 }
 
-function renderToString(view: TemplateValue | (() => TemplateValue)): string {
-  const value = typeof view === "function" && !isSignal(view)
-    ? (view as () => TemplateValue)()
-    : normalizeValue(view);
-  return valueToString(value);
+function renderToString(view: TemplateValue | (() => TemplateValue), options: RenderToStringOptions = {}): string {
+  return withConfig(options.config, () => {
+    const value = typeof view === "function" && !isSignal(view)
+      ? (view as () => TemplateValue)()
+      : normalizeValue(view);
+    return valueToString(value);
+  });
 }
 
 function valueToString(value: unknown): string {
@@ -987,15 +1553,37 @@ function templateToString(result: TemplateResult): string {
     if (attrMatch) {
       const rawName = attrMatch[1];
       const before = part.slice(0, part.length - attrMatch[0].length);
-      const first = rawName[0];
-      const kind = first === "@" ? "event" : first === "." ? "prop" : first === "?" ? "bool" : "attr";
-      const name = kind === "attr" ? rawName : rawName.slice(1);
+      const { kind, name } = bindingFromName(rawName);
+      if (kind === "attr" && name === "bind" && isPlainObject(value)) {
+        const serialized: string[] = [];
+        for (const key of Reflect.ownKeys(value)) {
+          const entryValue = normalizeValue((value as any)[key]);
+          const entry = bindingFromName(String(key));
+          const entryName = entry.name || "";
+          if (entry.kind === "event" || entryValue === false || entryValue === null || entryValue === undefined) continue;
+          if (entry.kind === "bool") {
+            if (entryValue) serialized.push(entryName);
+            continue;
+          }
+          if (entry.kind === "prop") {
+            if (entryName === "value") {
+              serialized.push(`value="${escapeAttribute(String(entryValue))}"`);
+            } else if ((entryName === "checked" || entryName === "selected") && entryValue) {
+              serialized.push(entryName);
+            }
+            continue;
+          }
+          serialized.push(`${entryName}="${escapeAttribute(stringifyAttribute(entryName, entryValue))}"`);
+        }
+        source += serialized.length ? `${before}${serialized.join(" ")}` : before;
+        continue;
+      }
       if (kind === "event" || kind === "prop" || value === false || value === null || value === undefined) {
         source += before;
       } else if (kind === "bool") {
         source += value ? `${before}${name}` : before;
       } else {
-        source += `${before}${name}="${escapeAttribute(stringifyAttribute(name, value))}"`;
+        source += `${before}${name || ""}="${escapeAttribute(stringifyAttribute(name || "", value))}"`;
       }
     } else {
       source += part + valueToString(value);
@@ -1035,6 +1623,7 @@ interface ComponentContext {
   host: HTMLElement;
   root: HTMLElement | ShadowRoot;
   attr(name: string): ReadonlySignal<string | null>;
+  prop<T = unknown>(name: string): ReadonlySignal<T>;
   emit<T = unknown>(name: string, detail?: T, options?: CustomEventInit<T>): boolean;
   effect(callback: (onCleanup: (cleanup: Cleanup) => void) => void): EffectHandle;
   onConnected(callback: () => void): void;
@@ -1047,8 +1636,10 @@ type ComponentSetup = (ctx: ComponentContext) => ComponentRender | void;
 interface ComponentOptions {
   attrs?: string[];
   observedAttributes?: string[];
+  props?: string[];
   shadow?: boolean | ShadowRootMode | ShadowRootInit;
   styles?: string;
+  config?: ItyConfig | null;
   setup?: ComponentSetup;
 }
 
@@ -1070,6 +1661,7 @@ function component(
     ? { ...maybeOptions, setup: setupOrOptions }
     : setupOrOptions;
   const attrs = definition.observedAttributes || definition.attrs || [];
+  const props = definition.props || [];
 
   class ItyElement extends win.HTMLElement {
     static get observedAttributes(): string[] {
@@ -1077,6 +1669,7 @@ function component(
     }
 
     private attrSignals = new Map<string, Signal<string | null>>();
+    private propSignals = new Map<string, Signal<unknown>>();
     private connectedCallbacks: Cleanup[] = [];
     private disconnectedCallbacks: Cleanup[] = [];
     private effectRecords: Array<{
@@ -1093,6 +1686,7 @@ function component(
 
     connectedCallback(): void {
       this.ensureMount();
+      for (const prop of props) this.upgradeProperty(prop);
       if (!this.initialized) {
         this.initialized = true;
         const ctx = this.createContext();
@@ -1152,7 +1746,10 @@ function component(
 
     private startRender(): void {
       if (this.renderCleanup || this.renderOutput === undefined) return;
-      this.renderCleanup = render(this.renderOutput, this.renderTarget!, { transition: false });
+      this.renderCleanup = render(this.renderOutput, this.renderTarget!, {
+        transition: false,
+        config: definition.config
+      });
     }
 
     private startEffects(): void {
@@ -1170,11 +1767,26 @@ function component(
       return this.attrSignals.get(name)!;
     }
 
+    private ensurePropSignal<T = unknown>(name: string): Signal<T> {
+      if (!this.propSignals.has(name)) {
+        this.propSignals.set(name, signal(undefined as unknown) as Signal<unknown>);
+      }
+      return this.propSignals.get(name)! as Signal<T>;
+    }
+
+    private upgradeProperty(name: string): void {
+      if (!hasOwn(this, name)) return;
+      const value = (this as any)[name];
+      delete (this as any)[name];
+      (this as any)[name] = value;
+    }
+
     private createContext(): ComponentContext {
       return {
         host: this,
         root: this.mount!,
         attr: (name) => this.ensureAttrSignal(name),
+        prop: <T = unknown>(name: string) => this.ensurePropSignal<T>(name),
         emit: (name, detail, options = {}) => this.dispatchEvent(new CustomEvent(name, {
           bubbles: true,
           composed: true,
@@ -1201,6 +1813,19 @@ function component(
         }
       };
     }
+  }
+
+  for (const prop of props) {
+    Object.defineProperty(ItyElement.prototype, prop, {
+      configurable: true,
+      enumerable: true,
+      get(this: any) {
+        return this.ensurePropSignal(prop).peek();
+      },
+      set(this: any, value: unknown) {
+        this.ensurePropSignal(prop).set(typeof value === "function" ? (() => value) as any : value);
+      }
+    });
   }
 
   win.customElements.define(name, ItyElement);
@@ -1836,7 +2461,7 @@ class Router {
 
   constructor(options: RouterOptions = {}) {
     this.base = options.base || "/";
-    this.linkSelector = options.linkSelector || "a[data-ity-link]";
+    this.linkSelector = options.linkSelector || "a[href]";
     this.transition = Boolean(options.transition);
     this.notFound = options.notFound;
     if (options.autoStart !== false) this.start();
@@ -1870,6 +2495,30 @@ class Router {
       this.check();
     };
     withViewTransition(update, options.transition ?? this.transition);
+  }
+
+  href(path: string): string {
+    return withBasePath(path, this.base);
+  }
+
+  link(path: string, attrs: Record<string, unknown> = {}): Record<string, unknown> {
+    const previousClick = attrs["@click"] as ((event: Event) => void) | undefined;
+    const href = this.href(path);
+    return {
+      ...attrs,
+      href,
+      "@click": (event: Event) => {
+        previousClick?.(event);
+        const currentTarget = event.currentTarget as HTMLAnchorElement | null;
+        const anchor = currentTarget && typeof (currentTarget as any).matches === "function" && currentTarget.matches(this.linkSelector)
+          ? currentTarget
+          : null;
+        const url = this.resolveNavigationURL(event, anchor, href);
+        if (!url) return;
+        event.preventDefault();
+        this.navigate(`${url.pathname}${url.search}${url.hash}`);
+      }
+    };
   }
 
   start(): void {
@@ -1946,14 +2595,9 @@ class Router {
   }
 
   private handleLinkClick(event: Event): void {
-    const target = event.target as HTMLElement | null;
-    const anchor = target?.closest?.(this.linkSelector) as HTMLAnchorElement | null;
-    if (!anchor || anchor.target || anchor.hasAttribute("download")) return;
-    const win = getWindow();
-    if (!win) return;
-    const url = new URL(anchor.href, win.location.href);
-    if (url.origin !== win.location.origin) return;
-    if (stripBasePath(url.pathname, this.base) === null) return;
+    const anchor = this.findAnchor(event);
+    const url = this.resolveNavigationURL(event, anchor);
+    if (!url) return;
     event.preventDefault();
     this.navigate(`${url.pathname}${url.search}${url.hash}`);
   }
@@ -1976,6 +2620,36 @@ class Router {
     const cleanup = this.routeCleanup;
     this.routeCleanup = undefined;
     cleanup();
+  }
+
+  private resolveNavigationURL(event: Event, anchor: HTMLAnchorElement | null, fallbackHref?: string): URL | null {
+    const mouseEvent = event as MouseEvent;
+    if (event.defaultPrevented) return null;
+    if (typeof mouseEvent.button === "number" && mouseEvent.button !== 0) return null;
+    if (mouseEvent.metaKey || mouseEvent.ctrlKey || mouseEvent.shiftKey || mouseEvent.altKey) return null;
+    if (anchor && ((anchor.target && anchor.target !== "_self") || anchor.hasAttribute("download"))) return null;
+    const win = getWindow();
+    if (!win) return null;
+    const href = anchor?.getAttribute("href") ?? fallbackHref;
+    if (!href || /^(mailto|tel):/i.test(href)) return null;
+    const url = new URL(anchor?.href || href, win.location.href);
+    if (url.origin !== win.location.origin) return null;
+    if (stripBasePath(url.pathname, this.base) === null) return null;
+    return url;
+  }
+
+  private findAnchor(event: Event): HTMLAnchorElement | null {
+    const win = getWindow();
+    const fromPath = typeof (event as any).composedPath === "function"
+      ? ((event as any).composedPath() as EventTarget[])
+      : [];
+    for (const entry of fromPath) {
+      if (!entry || !(entry as any).matches) continue;
+      const element = entry as HTMLElement;
+      if (element.matches(this.linkSelector)) return element as HTMLAnchorElement;
+    }
+    const target = event.target as HTMLElement | null;
+    return target?.closest?.(this.linkSelector) as HTMLAnchorElement | null;
   }
 }
 
@@ -2101,7 +2775,8 @@ function route(pattern: string, handler: RouteHandler): Router {
 }
 
 const Ity = {
-  version: "2.1.0",
+  version: "2.2.0",
+  createConfig,
   configure,
   signal,
   computed,
@@ -2114,6 +2789,7 @@ const Ity = {
   resource,
   action,
   form,
+  formState,
   html,
   unsafeHTML,
   render,
@@ -2157,10 +2833,12 @@ export {
   batch,
   component,
   configure,
+  createConfig,
   computed,
   effect,
   action,
   form,
+  formState,
   html,
   isSignal,
   onDOMReady,
@@ -2181,12 +2859,19 @@ export type {
   ComponentContext,
   ComponentOptions,
   EffectHandle,
+  FormBindOptions,
   FormController,
+  FormField,
   FormOptions,
+  FormState,
+  FormStateController,
+  FormStateOptions,
+  FormStateSubmitOptions,
   HTMLSanitizer,
   ItyConfig,
   ReadonlySignal,
   RenderOptions,
+  RenderToStringOptions,
   Resource,
   ResourceContext,
   ResourceOptions,

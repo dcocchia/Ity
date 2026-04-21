@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ity Examples</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f1ea;
+        --panel: rgba(255, 255, 255, 0.88);
+        --ink: #16213a;
+        --muted: #5b6b7f;
+        --accent: #ba5b15;
+        --border: rgba(22, 33, 58, 0.08);
+        --shadow: 0 30px 70px rgba(16, 24, 40, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        background:
+          radial-gradient(circle at top left, rgba(243, 180, 91, 0.18), transparent 24rem),
+          radial-gradient(circle at top right, rgba(79, 132, 232, 0.14), transparent 26rem),
+          linear-gradient(180deg, #faf6ef 0%, var(--bg) 100%);
+        color: var(--ink);
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        line-height: 1.5;
+        margin: 0;
+        min-height: 100vh;
+      }
+
+      main {
+        margin: 0 auto;
+        max-width: 1040px;
+        padding: 2rem 1.25rem 3rem;
+      }
+
+      .hero,
+      .card {
+        backdrop-filter: blur(14px);
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 28px;
+        box-shadow: var(--shadow);
+      }
+
+      .hero {
+        margin-bottom: 1.25rem;
+        padding: 1.5rem;
+      }
+
+      .eyebrow {
+        color: var(--muted);
+        font-size: 0.82rem;
+        letter-spacing: 0.1em;
+        margin: 0 0 0.4rem;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2 {
+        font-family: "Avenir Next Condensed", "Avenir Next", "Segoe UI", sans-serif;
+        letter-spacing: -0.03em;
+        line-height: 1;
+        margin: 0;
+      }
+
+      h1 {
+        font-size: clamp(2.4rem, 5vw, 4rem);
+        margin-bottom: 0.75rem;
+      }
+
+      p {
+        margin: 0;
+      }
+
+      .hero p + p {
+        margin-top: 0.75rem;
+      }
+
+      .grid {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+
+      .card {
+        display: grid;
+        gap: 0.9rem;
+        padding: 1.25rem;
+      }
+
+      .card p {
+        color: var(--muted);
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .link {
+        align-items: center;
+        background: var(--ink);
+        border-radius: 999px;
+        color: #fff;
+        display: inline-flex;
+        justify-content: center;
+        min-height: 2.75rem;
+        padding: 0.75rem 1rem;
+        text-decoration: none;
+        width: fit-content;
+      }
+
+      code {
+        background: rgba(22, 33, 58, 0.06);
+        border-radius: 8px;
+        padding: 0.15rem 0.4rem;
+      }
+
+      @media (max-width: 640px) {
+        main {
+          padding: 1rem 0.9rem 2rem;
+        }
+
+        .hero,
+        .card {
+          border-radius: 22px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <p class="eyebrow">Ity Examples</p>
+        <h1>Small demos plus one serious app</h1>
+        <p>Run <code>npm run examples:serve</code> from the repository root, then open the links below.</p>
+        <p>The Operations Workbench is the deep v2.2 example and exercises the modern library surface together.</p>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <p class="eyebrow">Deep Example</p>
+          <h2>Operations Workbench</h2>
+          <p>Local-first dashboard with resources, actions, form state, router links, custom elements, sanitization, and string rendering.</p>
+          <a class="link" href="./OperationsWorkbench/">Open Workbench</a>
+        </article>
+
+        <article class="card">
+          <p class="eyebrow">Focused Demo</p>
+          <h2>Calculator</h2>
+          <p>Small signal-driven UI that shows the basic render loop and DOM bindings.</p>
+          <a class="link" href="./Calculator/">Open Calculator</a>
+        </article>
+
+        <article class="card">
+          <p class="eyebrow">Focused Demo</p>
+          <h2>Collection</h2>
+          <p>Legacy MVC collection usage alongside the newer runtime.</p>
+          <a class="link" href="./Collection/">Open Collection Demo</a>
+        </article>
+
+        <article class="card">
+          <p class="eyebrow">Focused Demo</p>
+          <h2>Router</h2>
+          <p>Route registration, navigation, and progressive SPA behavior.</p>
+          <a class="link" href="./Router/">Open Router Demo</a>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ity Example: Operations Workbench</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --owb-bg: #f4efe7;
+        --owb-panel: rgba(255, 255, 255, 0.86);
+        --owb-border: rgba(20, 33, 61, 0.08);
+        --owb-ink: #14213d;
+        --owb-muted: #526274;
+        --owb-danger: #b33419;
+        --owb-success: #106b39;
+        --owb-shadow: 0 24px 60px rgba(16, 24, 40, 0.08);
+        --owb-accent: #d97706;
+        --owb-accent-soft: #fff2d8;
+        --owb-accent-ink: #7c4700;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        background:
+          radial-gradient(circle at top left, rgba(255, 203, 126, 0.22), transparent 22rem),
+          radial-gradient(circle at top right, rgba(93, 146, 255, 0.12), transparent 24rem),
+          linear-gradient(180deg, #f8f3ec 0%, #efe8de 100%);
+        color: var(--owb-ink);
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        line-height: 1.45;
+        margin: 0;
+        min-height: 100vh;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+
+      #operationsWorkbenchApp {
+        margin: 0 auto;
+        max-width: 1320px;
+        padding: 2rem clamp(1rem, 2vw, 2rem) 3rem;
+      }
+
+      .owbRoot {
+        --owb-accent: #d97706;
+        --owb-accent-soft: #fff2d8;
+        --owb-accent-ink: #7c4700;
+        display: grid;
+        gap: 1.25rem;
+      }
+
+      .owbRoot[data-accent="ocean"] {
+        --owb-accent: #0f766e;
+        --owb-accent-soft: #daf7f4;
+        --owb-accent-ink: #07544f;
+      }
+
+      .owbRoot[data-accent="fern"] {
+        --owb-accent: #3f7d20;
+        --owb-accent-soft: #e6f6dd;
+        --owb-accent-ink: #2f5b18;
+      }
+
+      .owbShellHeader,
+      .owbPanel,
+      .owbEmptyState,
+      .owbNotice {
+        backdrop-filter: blur(14px);
+        background: var(--owb-panel);
+        border: 1px solid var(--owb-border);
+        border-radius: 30px;
+        box-shadow: var(--owb-shadow);
+      }
+
+      .owbShellHeader {
+        align-items: end;
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(250, 241, 228, 0.9)),
+          linear-gradient(135deg, var(--owb-accent-soft), transparent 55%);
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: 1fr auto;
+        overflow: hidden;
+        padding: 1.45rem 1.6rem;
+        position: relative;
+      }
+
+      .owbShellHeader::after {
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.7));
+        border-radius: 999px;
+        content: "";
+        height: 10rem;
+        position: absolute;
+        right: -2rem;
+        top: -2rem;
+        width: 10rem;
+      }
+
+      .owbEyebrow,
+      .owbKicker {
+        color: var(--owb-muted);
+        font-size: 0.82rem;
+        letter-spacing: 0.1em;
+        margin: 0 0 0.35rem;
+        text-transform: uppercase;
+      }
+
+      .owbShellHeader h1,
+      .owbSectionHeading h2,
+      .owbPanel h3,
+      .owbEmptyState h2 {
+        font-family: "Avenir Next Condensed", "Avenir Next", "Segoe UI", sans-serif;
+        letter-spacing: -0.03em;
+        line-height: 1;
+        margin: 0;
+      }
+
+      .owbShellHeader h1 {
+        font-size: clamp(2.2rem, 5vw, 3.8rem);
+        margin-bottom: 0.55rem;
+      }
+
+      .owbShellSubhead {
+        color: var(--owb-muted);
+        margin: 0;
+        max-width: 52rem;
+      }
+
+      .owbHeaderActions,
+      .owbInlineActions,
+      .owbFormActions,
+      .owbSectionHeading,
+      .owbStatRow {
+        align-items: center;
+        display: flex;
+        gap: 0.9rem;
+        justify-content: space-between;
+      }
+
+      .owbSyncBadge {
+        background: var(--owb-accent-soft);
+        border-radius: 999px;
+        color: var(--owb-accent-ink);
+        font-size: 0.88rem;
+        font-weight: 600;
+        padding: 0.5rem 0.85rem;
+      }
+
+      .owbNav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+      }
+
+      .owbNavLink,
+      .owbGhostButton,
+      .owbPrimaryButton,
+      .owbDangerButton,
+      .owbNoteCard {
+        border-radius: 999px;
+        display: inline-flex;
+        min-height: 2.75rem;
+        padding: 0.75rem 1rem;
+        text-decoration: none;
+        transition: transform 140ms ease, background 140ms ease, color 140ms ease, border-color 140ms ease;
+      }
+
+      .owbNavLink,
+      .owbGhostButton,
+      .owbPrimaryButton,
+      .owbDangerButton {
+        align-items: center;
+        border: 1px solid transparent;
+        cursor: pointer;
+        justify-content: center;
+      }
+
+      .owbNavLink {
+        background: rgba(255, 255, 255, 0.72);
+        border-color: rgba(20, 33, 61, 0.08);
+        color: var(--owb-muted);
+        font-weight: 600;
+      }
+
+      .owbNavLink.is-active {
+        background: var(--owb-accent);
+        color: #fff;
+      }
+
+      .owbGhostButton,
+      .owbGhostButton--link {
+        background: rgba(255, 255, 255, 0.85);
+        border-color: rgba(20, 33, 61, 0.1);
+        color: var(--owb-ink);
+      }
+
+      .owbPrimaryButton,
+      .owbPrimaryButton--link {
+        background: var(--owb-ink);
+        color: #fff;
+      }
+
+      .owbDangerButton {
+        background: #fff3f1;
+        color: var(--owb-danger);
+      }
+
+      .owbNotice {
+        align-items: center;
+        display: flex;
+        font-weight: 600;
+        padding: 0.95rem 1.15rem;
+      }
+
+      .owbNotice[data-tone="success"] {
+        background: rgba(230, 246, 221, 0.9);
+        color: #2f5b18;
+      }
+
+      .owbNotice[data-tone="error"] {
+        background: rgba(255, 235, 231, 0.94);
+        color: #8d250f;
+      }
+
+      .owbMain,
+      .owbMetrics,
+      .owbGrid,
+      .owbTaskStack,
+      .owbNoteList,
+      .owbChecklist,
+      .owbCheckboxGrid {
+        display: grid;
+        gap: 1rem;
+      }
+
+      .owbMetrics {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .owbGrid--dashboard,
+      .owbGrid--settings {
+        grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+      }
+
+      .owbGrid--tasks {
+        align-items: start;
+        grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr);
+      }
+
+      .owbGrid--detail,
+      .owbGrid--notes,
+      .owbGrid--reports {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      }
+
+      .owbPanel,
+      .owbEmptyState {
+        padding: 1.25rem;
+      }
+
+      .owbEmptyState {
+        justify-items: start;
+        padding: 2rem;
+      }
+
+      .owbList,
+      .owbChecklist,
+      .owbFieldset {
+        margin: 0;
+        padding: 0;
+      }
+
+      .owbList {
+        list-style: none;
+      }
+
+      .owbListItem {
+        align-items: start;
+        border-top: 1px solid rgba(20, 33, 61, 0.08);
+        display: grid;
+        gap: 0.35rem 1rem;
+        grid-template-columns: 1fr auto;
+        padding: 0.95rem 0;
+      }
+
+      .owbListItem:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+
+      .owbListItem p,
+      .owbBodyText {
+        color: var(--owb-muted);
+      }
+
+      .owbListItem p,
+      .owbListItem strong,
+      .owbBodyText,
+      .owbNoteCard p {
+        margin: 0.25rem 0 0;
+      }
+
+      .owbRichText p {
+        margin: 0.4rem 0 0.7rem;
+      }
+
+      .owbRichText strong {
+        color: var(--owb-ink);
+      }
+
+      .owbInlineLink {
+        color: var(--owb-accent-ink);
+        font-weight: 600;
+      }
+
+      .owbForm,
+      .owbFormGrid,
+      .owbPreviewPanel {
+        display: grid;
+        gap: 0.9rem;
+      }
+
+      .owbFormGrid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      label,
+      fieldset {
+        display: grid;
+        gap: 0.4rem;
+      }
+
+      fieldset {
+        border: 1px solid rgba(20, 33, 61, 0.08);
+        border-radius: 20px;
+        padding: 0.9rem;
+      }
+
+      legend {
+        color: var(--owb-muted);
+        font-size: 0.9rem;
+        padding: 0 0.4rem;
+      }
+
+      input,
+      select,
+      textarea {
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(20, 33, 61, 0.12);
+        border-radius: 18px;
+        color: var(--owb-ink);
+        min-height: 2.9rem;
+        padding: 0.8rem 0.95rem;
+        width: 100%;
+      }
+
+      textarea {
+        border-radius: 22px;
+        min-height: 8rem;
+        resize: vertical;
+      }
+
+      input:focus,
+      select:focus,
+      textarea:focus {
+        border-color: var(--owb-accent);
+        box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.12);
+        outline: 0;
+      }
+
+      .owbCheckboxRow,
+      .owbChecklistItem {
+        align-items: center;
+        display: flex;
+        gap: 0.7rem;
+      }
+
+      .owbCheckboxRow input,
+      .owbChecklistItem input {
+        min-height: auto;
+        padding: 0;
+        width: auto;
+      }
+
+      .owbCheckboxGrid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .owbNoteCard {
+        align-items: start;
+        background: rgba(255, 255, 255, 0.78);
+        border: 1px solid rgba(20, 33, 61, 0.08);
+        color: inherit;
+        cursor: pointer;
+        display: grid;
+        gap: 0.2rem;
+        justify-items: start;
+        min-height: auto;
+        padding: 1rem;
+        text-align: left;
+      }
+
+      .owbNoteCard strong {
+        font-size: 1rem;
+      }
+
+      .owbStatRow {
+        align-items: start;
+        background: rgba(250, 246, 240, 0.85);
+        border-radius: 22px;
+        display: grid;
+        gap: 0.8rem;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin: 1rem 0;
+        padding: 1rem;
+      }
+
+      .owbStatRow dt {
+        color: var(--owb-muted);
+        font-size: 0.82rem;
+        margin-bottom: 0.2rem;
+        text-transform: uppercase;
+      }
+
+      .owbStatRow dd {
+        font-weight: 700;
+        margin: 0;
+      }
+
+      .owbCodeBlock {
+        background: #101820;
+        color: #eaf2ff;
+        font-family: "SFMono-Regular", "Menlo", monospace;
+      }
+
+      .owbReportPreview {
+        background: linear-gradient(180deg, #fffefc, #f5f0e9);
+        border: 1px solid rgba(20, 33, 61, 0.08);
+        border-radius: 24px;
+        min-height: 24rem;
+        padding: 1.25rem;
+      }
+
+      .owbReportDocument h1,
+      .owbReportDocument h2 {
+        margin: 0 0 0.5rem;
+      }
+
+      .owbReportDocument section + section {
+        margin-top: 1.2rem;
+      }
+
+      .owbInlineError {
+        color: var(--owb-danger);
+        font-weight: 600;
+        margin: 0;
+      }
+
+      .owbGhostButton:hover,
+      .owbPrimaryButton:hover,
+      .owbDangerButton:hover,
+      .owbNavLink:hover,
+      .owbNoteCard:hover {
+        transform: translateY(-1px);
+      }
+
+      .owbGhostButton:disabled,
+      .owbPrimaryButton:disabled,
+      .owbDangerButton:disabled {
+        cursor: not-allowed;
+        opacity: 0.65;
+        transform: none;
+      }
+
+      @media (max-width: 1040px) {
+        .owbMetrics,
+        .owbGrid--dashboard,
+        .owbGrid--tasks,
+        .owbGrid--detail,
+        .owbGrid--notes,
+        .owbGrid--reports,
+        .owbGrid--settings,
+        .owbFormGrid,
+        .owbStatRow,
+        .owbCheckboxGrid {
+          grid-template-columns: 1fr;
+        }
+
+        .owbShellHeader {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 720px) {
+        #operationsWorkbenchApp {
+          padding: 1rem 0.85rem 2rem;
+        }
+
+        .owbShellHeader,
+        .owbPanel,
+        .owbEmptyState,
+        .owbNotice {
+          border-radius: 24px;
+        }
+
+        .owbHeaderActions,
+        .owbSectionHeading,
+        .owbFormActions,
+        .owbInlineActions {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .owbNav {
+          overflow-x: auto;
+          padding-bottom: 0.2rem;
+        }
+
+        .owbNavLink {
+          white-space: nowrap;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="operationsWorkbenchApp"></div>
+
+    <script src="../../dist/ity.js"></script>
+    <script src="../../build/Examples/OperationsWorkbench/operationsWorkbenchApp.js"></script>
+    <script>
+      (function () {
+        var createApp = window.ItyExamples && window.ItyExamples.createOperationsWorkbenchApp;
+        if (!window.Ity || !createApp) {
+          document.getElementById('operationsWorkbenchApp').innerHTML =
+            '<p style="font-family: Avenir Next, Segoe UI, sans-serif; padding: 1rem;">Build the repository first with <code>npm run build</code>, then reload this page.</p>';
+          return;
+        }
+        createApp(window.Ity, {
+          target: '#operationsWorkbenchApp',
+          base: window.location.pathname.replace(/\/index\.html$/, '').replace(/\/+$/, ''),
+          storageKey: 'ity-operations-workbench'
+        });
+      })();
+    </script>
+  </body>
+</html>
