@@ -94,6 +94,10 @@ interface QueryEntry<T = unknown, E = unknown> {
   gcTimer: ReturnType<typeof setTimeout> | null;
 }
 
+function isFiniteStaleTime(staleTime: number): boolean {
+  return Number.isFinite(staleTime) && staleTime >= 0;
+}
+
 function stableStringify(value: unknown): string {
   if (value === undefined) return "undefined";
   if (typeof value === "number") {
@@ -139,6 +143,7 @@ class QueryClientImpl implements QueryClient {
     };
     const currentKey = signal<QueryKey>(resolveKey(), { name: `${options.name || "query"}.key` });
     const currentEntry = signal<QueryEntry<T, E>>(this.ensureEntry<T, E>(currentKey.peek(), options), { name: `${options.name || "query"}.entry` });
+    const staleState = signal(true, { name: `${options.name || "query"}.stale` });
     let disposed = false;
     let entryCleanup: Cleanup | null = null;
 
@@ -170,10 +175,38 @@ class QueryClientImpl implements QueryClient {
       }
     });
 
+    const stopStaleTracking = effect((onCleanup) => {
+      const entry = currentEntry();
+      const staleTime = options.staleTime ?? 0;
+      const updatedAt = entry.updatedAt();
+      const invalidatedAt = entry.invalidatedAt();
+
+      if (updatedAt === 0) {
+        staleState.set(true);
+        return;
+      }
+      if (invalidatedAt >= updatedAt && invalidatedAt !== 0) {
+        staleState.set(true);
+        return;
+      }
+      if (!isFiniteStaleTime(staleTime)) {
+        staleState.set(false);
+        return;
+      }
+
+      staleState.set(false);
+      const expiresIn = Math.max(0, updatedAt + staleTime - Date.now()) + 1;
+      const timer = setTimeout(() => {
+        staleState.set(true);
+      }, expiresIn);
+      onCleanup(() => clearTimeout(timer));
+    });
+
     const dispose = (): void => {
       if (disposed) return;
       disposed = true;
       stopKeyTracking();
+      stopStaleTracking();
       if (entryCleanup) entryCleanup();
       entryCleanup = null;
     };
@@ -184,13 +217,7 @@ class QueryClientImpl implements QueryClient {
       error: computed(() => currentEntry().error()),
       loading: computed(() => currentEntry().pending()),
       status: computed(() => currentEntry().status()),
-      stale: computed(() => {
-        const entry = currentEntry();
-        const staleTime = options.staleTime ?? 0;
-        if (entry.invalidatedAt() >= entry.updatedAt() && entry.invalidatedAt() !== 0) return true;
-        if (entry.updatedAt() === 0) return true;
-        return Date.now() - entry.updatedAt() > staleTime;
-      }),
+      stale: computed(() => staleState()),
       updatedAt: computed(() => currentEntry().updatedAt()),
       promise: computed(() => currentEntry().promise()),
       refresh: () => this.fetchEntry(currentEntry.peek(), loader, options),

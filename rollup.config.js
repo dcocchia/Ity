@@ -56,12 +56,12 @@ function moduleBuild(name, input, external = []) {
   };
 }
 
-function dtsBuild(name) {
+function dtsBuild(name, outputName = name) {
   return {
     input: `types/${name}.d.ts`,
     plugins: [dts()],
     output: {
-      file: `dist/${name}.d.ts`,
+      file: `dist/${outputName}.d.ts`,
       format: 'es'
     }
   };
@@ -92,7 +92,7 @@ module.exports = [
   moduleBuild('query', 'query.ts', ['./Ity']),
   moduleBuild('forms', 'forms.ts', ['./Ity']),
   moduleBuild('react', 'react.ts', ['./Ity', 'react']),
-  dtsBuild('Ity'),
+  dtsBuild('Ity', 'ity'),
   dtsBuild('query'),
   dtsBuild('forms'),
   dtsBuild('react')

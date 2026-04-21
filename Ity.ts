@@ -2303,10 +2303,15 @@ function valueToString(value: unknown): string {
 function valueToStringWithKey(value: unknown, key: string): string {
   const rendered = valueToString(value);
   if (!rendered) return "";
-  if (!rendered.startsWith("<")) {
+  const leadingWhitespace = rendered.match(/^\s*/)?.[0] || "";
+  const trimmed = rendered.slice(leadingWhitespace.length);
+  if (!trimmed.startsWith("<")) {
     throw new Error("Ity.repeat items must render an element root node.");
   }
-  return rendered.replace(/^<([A-Za-z][^\s/>]*)(\s|>)/, `<$1 data-ity-key="${escapeAttribute(key)}"$2`);
+  if (!/^<([A-Za-z][^\s/>]*)(\s|>)/.test(trimmed)) {
+    throw new Error("Ity.repeat items must render an element root node.");
+  }
+  return `${leadingWhitespace}${trimmed.replace(/^<([A-Za-z][^\s/>]*)(\s|>)/, `<$1 data-ity-key="${escapeAttribute(key)}"$2`)}`;
 }
 
 function templateToString(result: TemplateResult): string {

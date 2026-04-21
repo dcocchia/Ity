@@ -65,6 +65,22 @@ describe('V3 kernel', function () {
     cleanup();
   });
 
+  it('supports SSR repeat items with leading template whitespace', function () {
+    const cleanup = setupDOM();
+
+    const output = window.Ity.renderToString(() => window.Ity.html`
+      <ul>
+        ${window.Ity.repeat([{ id: 'alpha', label: 'Alpha' }], (item: any) => item.id, (item: any) => window.Ity.html`
+          <li>${item.label}</li>
+        `)}
+      </ul>
+    `);
+
+    assert.match(output, /data-ity-key="alpha"/);
+    assert.match(output, /<li data-ity-key="alpha">Alpha<\/li>/);
+    cleanup();
+  });
+
   it('provides and injects scoped services through components', async function () {
     const cleanup = setupDOM('<!DOCTYPE html><main id="root"></main>');
     const tag = `ity-scope-${++componentCounter}`;

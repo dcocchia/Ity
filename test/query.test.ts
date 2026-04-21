@@ -121,7 +121,7 @@ describe('Query module', function () {
     const client = createQueryClient({ gcTime: 5 });
     let version = 0;
     const current = query(client, ['settings', { scope: 'all' }], async () => ({ version: ++version }), {
-      staleTime: 0
+      staleTime: 25
     });
 
     await current.refresh();
@@ -138,6 +138,21 @@ describe('Query module', function () {
     current.dispose();
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.strictEqual(client.getStatus(['settings', { scope: 'all' }]), 'missing');
+  });
+
+  it('marks queries stale after staleTime elapses without further reactive changes', async function () {
+    const client = createQueryClient();
+    const current = query(client, 'aging', async () => ({ ok: true }), {
+      staleTime: 15
+    });
+
+    await current.refresh();
+    assert.strictEqual(current.stale(), false);
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    assert.strictEqual(current.stale(), true);
+    current.dispose();
   });
 
   it('supports signal keys, result-level invalidation, and ignores stale refresh races', async function () {

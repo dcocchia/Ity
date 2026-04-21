@@ -1,5 +1,8 @@
 import { signal, effect, computed, action } from './ity.esm.mjs';
 
+function isFiniteStaleTime(staleTime) {
+    return Number.isFinite(staleTime) && staleTime >= 0;
+}
 function stableStringify(value) {
     if (value === undefined)
         return "undefined";
@@ -48,6 +51,7 @@ class QueryClientImpl {
         };
         const currentKey = signal(resolveKey(), { name: `${options.name || "query"}.key` });
         const currentEntry = signal(this.ensureEntry(currentKey.peek(), options), { name: `${options.name || "query"}.entry` });
+        const staleState = signal(true, { name: `${options.name || "query"}.stale` });
         let disposed = false;
         let entryCleanup = null;
         const attachEntry = (nextKey) => {
@@ -78,11 +82,37 @@ class QueryClientImpl {
                 this.fetchEntry(entry, loader, options);
             }
         });
+        const stopStaleTracking = effect((onCleanup) => {
+            var _a;
+            const entry = currentEntry();
+            const staleTime = (_a = options.staleTime) !== null && _a !== void 0 ? _a : 0;
+            const updatedAt = entry.updatedAt();
+            const invalidatedAt = entry.invalidatedAt();
+            if (updatedAt === 0) {
+                staleState.set(true);
+                return;
+            }
+            if (invalidatedAt >= updatedAt && invalidatedAt !== 0) {
+                staleState.set(true);
+                return;
+            }
+            if (!isFiniteStaleTime(staleTime)) {
+                staleState.set(false);
+                return;
+            }
+            staleState.set(false);
+            const expiresIn = Math.max(0, updatedAt + staleTime - Date.now()) + 1;
+            const timer = setTimeout(() => {
+                staleState.set(true);
+            }, expiresIn);
+            onCleanup(() => clearTimeout(timer));
+        });
         const dispose = () => {
             if (disposed)
                 return;
             disposed = true;
             stopKeyTracking();
+            stopStaleTracking();
             if (entryCleanup)
                 entryCleanup();
             entryCleanup = null;
@@ -93,16 +123,7 @@ class QueryClientImpl {
             error: computed(() => currentEntry().error()),
             loading: computed(() => currentEntry().pending()),
             status: computed(() => currentEntry().status()),
-            stale: computed(() => {
-                var _a;
-                const entry = currentEntry();
-                const staleTime = (_a = options.staleTime) !== null && _a !== void 0 ? _a : 0;
-                if (entry.invalidatedAt() >= entry.updatedAt() && entry.invalidatedAt() !== 0)
-                    return true;
-                if (entry.updatedAt() === 0)
-                    return true;
-                return Date.now() - entry.updatedAt() > staleTime;
-            }),
+            stale: computed(() => staleState()),
             updatedAt: computed(() => currentEntry().updatedAt()),
             promise: computed(() => currentEntry().promise()),
             refresh: () => this.fetchEntry(currentEntry.peek(), loader, options),

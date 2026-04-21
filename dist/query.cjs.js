@@ -2,6 +2,9 @@
 
 var Ity = require('./ity.cjs.js');
 
+function isFiniteStaleTime(staleTime) {
+    return Number.isFinite(staleTime) && staleTime >= 0;
+}
 function stableStringify(value) {
     if (value === undefined)
         return "undefined";
@@ -50,6 +53,7 @@ class QueryClientImpl {
         };
         const currentKey = Ity.signal(resolveKey(), { name: `${options.name || "query"}.key` });
         const currentEntry = Ity.signal(this.ensureEntry(currentKey.peek(), options), { name: `${options.name || "query"}.entry` });
+        const staleState = Ity.signal(true, { name: `${options.name || "query"}.stale` });
         let disposed = false;
         let entryCleanup = null;
         const attachEntry = (nextKey) => {
@@ -80,11 +84,37 @@ class QueryClientImpl {
                 this.fetchEntry(entry, loader, options);
             }
         });
+        const stopStaleTracking = Ity.effect((onCleanup) => {
+            var _a;
+            const entry = currentEntry();
+            const staleTime = (_a = options.staleTime) !== null && _a !== void 0 ? _a : 0;
+            const updatedAt = entry.updatedAt();
+            const invalidatedAt = entry.invalidatedAt();
+            if (updatedAt === 0) {
+                staleState.set(true);
+                return;
+            }
+            if (invalidatedAt >= updatedAt && invalidatedAt !== 0) {
+                staleState.set(true);
+                return;
+            }
+            if (!isFiniteStaleTime(staleTime)) {
+                staleState.set(false);
+                return;
+            }
+            staleState.set(false);
+            const expiresIn = Math.max(0, updatedAt + staleTime - Date.now()) + 1;
+            const timer = setTimeout(() => {
+                staleState.set(true);
+            }, expiresIn);
+            onCleanup(() => clearTimeout(timer));
+        });
         const dispose = () => {
             if (disposed)
                 return;
             disposed = true;
             stopKeyTracking();
+            stopStaleTracking();
             if (entryCleanup)
                 entryCleanup();
             entryCleanup = null;
@@ -95,16 +125,7 @@ class QueryClientImpl {
             error: Ity.computed(() => currentEntry().error()),
             loading: Ity.computed(() => currentEntry().pending()),
             status: Ity.computed(() => currentEntry().status()),
-            stale: Ity.computed(() => {
-                var _a;
-                const entry = currentEntry();
-                const staleTime = (_a = options.staleTime) !== null && _a !== void 0 ? _a : 0;
-                if (entry.invalidatedAt() >= entry.updatedAt() && entry.invalidatedAt() !== 0)
-                    return true;
-                if (entry.updatedAt() === 0)
-                    return true;
-                return Date.now() - entry.updatedAt() > staleTime;
-            }),
+            stale: Ity.computed(() => staleState()),
             updatedAt: Ity.computed(() => currentEntry().updatedAt()),
             promise: Ity.computed(() => currentEntry().promise()),
             refresh: () => this.fetchEntry(currentEntry.peek(), loader, options),

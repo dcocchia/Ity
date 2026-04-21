@@ -1904,13 +1904,19 @@ function valueToString(value) {
     return escapeHTML(String(value));
 }
 function valueToStringWithKey(value, key) {
+    var _a;
     const rendered = valueToString(value);
     if (!rendered)
         return "";
-    if (!rendered.startsWith("<")) {
+    const leadingWhitespace = ((_a = rendered.match(/^\s*/)) === null || _a === void 0 ? void 0 : _a[0]) || "";
+    const trimmed = rendered.slice(leadingWhitespace.length);
+    if (!trimmed.startsWith("<")) {
         throw new Error("Ity.repeat items must render an element root node.");
     }
-    return rendered.replace(/^<([A-Za-z][^\s/>]*)(\s|>)/, `<$1 data-ity-key="${escapeAttribute(key)}"$2`);
+    if (!/^<([A-Za-z][^\s/>]*)(\s|>)/.test(trimmed)) {
+        throw new Error("Ity.repeat items must render an element root node.");
+    }
+    return `${leadingWhitespace}${trimmed.replace(/^<([A-Za-z][^\s/>]*)(\s|>)/, `<$1 data-ity-key="${escapeAttribute(key)}"$2`)}`;
 }
 function templateToString(result) {
     var _a, _b;
