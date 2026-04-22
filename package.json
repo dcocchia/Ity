@@ -1,6 +1,6 @@
 {
   "name": "ity",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "A tiny runtime-dependency-free reactive app kernel with native-first v3 bridges for larger browser applications",
   "main": "dist/ity.cjs.js",
   "module": "dist/ity.esm.mjs",
@@ -55,6 +55,7 @@
     "precoverage": "tsc -p tsconfig.json && cp build/Ity.js Ity.js",
     "coverage": "jest --coverage",
     "build": "tsc -p tsconfig.json && cp build/Ity.js Ity.js && rollup -c",
+    "perf:bench": "npm run build && node scripts/perf-bench.mjs",
     "examples:serve": "npm run build && node scripts/examples-server.mjs",
     "examples:workbench": "npm run examples:serve",
     "test:dist": "ITY_FILE=../../dist/ity.min.js ITY_CORE_FILE=../../dist/ity.cjs.js ITY_QUERY_FILE=../../dist/query.cjs.js ITY_FORMS_FILE=../../dist/forms.cjs.js ITY_REACT_FILE=../../dist/react.cjs.js npm test -- --coverage=false"

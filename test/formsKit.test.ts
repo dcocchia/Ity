@@ -476,4 +476,106 @@ describe('Forms module', function () {
     assert.strictEqual(checklist.keys().length, 3);
     assert.strictEqual(checklist.keys()[2], originalKeys[1]);
   });
+
+  it('covers derived signals, fallback sync branches, and submit catch helpers', async function () {
+    const cleanup = setupDOM('<!DOCTYPE html><main id="root"></main>');
+    const form = createFormKit({
+      prefs: {
+        enabled: false,
+        tags: [] as string[],
+        plan: '',
+        count: 1,
+        extra: null as any
+      },
+      name: ''
+    }, {
+      validators: {
+        name: async () => {
+          await flush();
+          throw new Error('validator boom');
+        },
+        'prefs.plan': (value: string) => value ? null : 'Plan required'
+      }
+    });
+
+    const nameBind = form.bind('name');
+    const enabledBind = form.bind('prefs.enabled', { type: 'checkbox' });
+    const tagAlphaBind = form.bind('prefs.tags', { type: 'checkbox', value: 'alpha' });
+    const tagBetaBind = form.bind('prefs.tags', { type: 'checkbox', value: 'beta' });
+    const planBasicBind = form.bind('prefs.plan', { type: 'radio', value: 'basic' });
+    const planProBind = form.bind('prefs.plan', { type: 'radio', value: 'pro' });
+
+    Ity.render(() => Ity.html`
+      <form id="coverage-form">
+        <input id="name-coverage" bind=${nameBind}>
+        <input id="enabled-coverage" type="checkbox" bind=${enabledBind}>
+        <input id="tag-alpha-coverage" type="checkbox" bind=${tagAlphaBind}>
+        <input id="tag-beta-coverage" type="checkbox" bind=${tagBetaBind}>
+        <input id="plan-basic-coverage" type="radio" bind=${planBasicBind}>
+        <input id="plan-pro-coverage" type="radio" bind=${planProBind}>
+      </form>
+    `, '#root');
+
+    const enabledChecked = enabledBind['.checked'] as any;
+    const planProChecked = planProBind['.checked'] as any;
+    const seenEnabled: Array<[boolean, boolean]> = [];
+    const stopEnabled = enabledChecked.subscribe((value: boolean, previous: boolean) => {
+      seenEnabled.push([value, previous]);
+    }, { immediate: true });
+
+    assert.strictEqual(enabledChecked.get(), false);
+    assert.strictEqual(enabledChecked.peek(), false);
+    assert.strictEqual(planProChecked(), false);
+    assert.deepStrictEqual(form.initialValues().prefs.tags, []);
+    assert.strictEqual(form.validating(), false);
+    assert.strictEqual(form.valid(), true);
+
+    const countField = form.field('prefs.count');
+    assert.strictEqual(countField.value.get(), 1);
+    countField.value.update((value: number) => value + 1);
+    assert.strictEqual(countField.value.peek(), 2);
+
+    form.set('prefs.extra.0.city', 'Paris');
+    assert.strictEqual(form.values().prefs.extra[0].city, 'Paris');
+
+    const nameInput = document.getElementById('name-coverage') as HTMLInputElement;
+    nameInput.value = 'Launch';
+    nameInput.dispatchEvent(new window.Event('blur', { bubbles: true }));
+    await flush();
+    await flush();
+
+    (enabledBind['@change'] as Function)({ currentTarget: { checked: true } });
+    await flush();
+    assert.strictEqual(form.values().prefs.enabled, true);
+    assert.strictEqual(enabledChecked(), true);
+
+    (tagAlphaBind['@change'] as Function)({ currentTarget: { checked: true, value: 'alpha' } });
+    (tagBetaBind['@change'] as Function)({ currentTarget: { checked: true, value: 'beta' } });
+    (planProBind['@change'] as Function)({ currentTarget: { checked: true, value: 'pro' } });
+    await flush();
+
+    assert.deepStrictEqual(form.values().prefs.tags, ['alpha', 'beta']);
+    assert.strictEqual(form.values().prefs.plan, 'pro');
+    assert.strictEqual(planProChecked(), true);
+    assert.ok(seenEnabled.some(([value]) => value === true));
+
+    form.field('prefs.plan').set('');
+    assert.strictEqual(await form.field('prefs.plan').validate(), false);
+    assert.strictEqual(form.errors()['prefs.plan'], 'Plan required');
+
+    const submit = form.submit(async () => {
+      throw new Error('submit boom');
+    });
+    const formElement = document.getElementById('coverage-form') as HTMLFormElement;
+    submit.handleSubmit({
+      preventDefault() {},
+      currentTarget: formElement,
+      target: formElement
+    } as any);
+    await flush();
+    await flush();
+
+    stopEnabled();
+    cleanup();
+  });
 });

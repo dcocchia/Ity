@@ -10,6 +10,7 @@ var Ity = (function (exports) {
   const activeConfigStack = [];
   const runtimeObservers = new Set();
   const renderScopeByTarget = new WeakMap();
+  const templateCache = new WeakMap();
   let scopeId = 0;
   let runtimeDispatchDepth = 0;
   function emitRuntimeEvent(event) {
@@ -438,6 +439,34 @@ var Ity = (function (exports) {
   function resolveSignal(value) {
       return isSignal(value) ? value() : value;
   }
+  function createDerivedSignal(reader) {
+      const read = function () {
+          return reader();
+      };
+      read.get = () => reader();
+      read.peek = () => untrack(reader);
+      read.subscribe = (callback, options = {}) => {
+          let first = true;
+          let previous = read.peek();
+          return effect(() => {
+              const current = reader();
+              if (first) {
+                  first = false;
+                  previous = current;
+                  if (options.immediate)
+                      callback(current, current);
+                  return;
+              }
+              if (!Object.is(previous, current)) {
+                  const prev = previous;
+                  previous = current;
+                  callback(current, prev);
+              }
+          });
+      };
+      Object.defineProperty(read, "isSignal", { value: true });
+      return read;
+  }
   function configure(options = {}) {
       configuredSanitizeHTML = options.sanitizeHTML || undefined;
       configuredWarningHandler = options.onWarning || undefined;
@@ -574,26 +603,30 @@ var Ity = (function (exports) {
               controller = new AbortController();
               const signal = controller.signal;
               const previous = data.peek();
-              pending.set(true);
-              statusValue.set("loading");
-              error.set(null);
               emitRuntimeEvent({
                   type: "resource:refresh",
                   timestamp: Date.now(),
                   name: options.name,
                   detail: { refreshId: id }
               });
-              if (!keepPrevious)
-                  data.set(undefined);
+              batch(() => {
+                  pending.set(true);
+                  statusValue.set("loading");
+                  error.set(null);
+                  if (!keepPrevious)
+                      data.set(undefined);
+              });
               currentPromise = Promise.resolve()
                   .then(() => loader({ signal, previous, refreshId: id }))
                   .then((value) => {
                   var _a;
                   if (id !== refreshId || signal.aborted)
                       return data.peek();
-                  data.set(value);
-                  error.set(null);
-                  statusValue.set("success");
+                  batch(() => {
+                      data.set(value);
+                      error.set(null);
+                      statusValue.set("success");
+                  });
                   emitRuntimeEvent({
                       type: "resource:success",
                       timestamp: Date.now(),
@@ -607,8 +640,10 @@ var Ity = (function (exports) {
                   var _a;
                   if (id !== refreshId)
                       return data.peek();
-                  error.set(err);
-                  statusValue.set("error");
+                  batch(() => {
+                      error.set(err);
+                      statusValue.set("error");
+                  });
                   emitRuntimeEvent({
                       type: "resource:error",
                       timestamp: Date.now(),
@@ -632,10 +667,12 @@ var Ity = (function (exports) {
                   controller.abort();
               controller = null;
               currentPromise = null;
-              data.set(value);
-              error.set(null);
-              pending.set(false);
-              statusValue.set(value === undefined ? "idle" : "success");
+              batch(() => {
+                  data.set(value);
+                  error.set(null);
+                  pending.set(false);
+                  statusValue.set(value === undefined ? "idle" : "success");
+              });
               emitRuntimeEvent({
                   type: "resource:mutate",
                   timestamp: Date.now(),
@@ -650,8 +687,10 @@ var Ity = (function (exports) {
               controller.abort(reason);
               controller = null;
               currentPromise = null;
-              pending.set(false);
-              statusValue.set(data.peek() === undefined ? "idle" : "success");
+              batch(() => {
+                  pending.set(false);
+                  statusValue.set(data.peek() === undefined ? "idle" : "success");
+              });
               emitRuntimeEvent({
                   type: "resource:abort",
                   timestamp: Date.now(),
@@ -676,9 +715,11 @@ var Ity = (function (exports) {
       let generation = 0;
       const submit = (...args) => {
           const runGeneration = generation;
-          count.update((value) => value + 1);
-          statusValue.set("loading");
-          error.set(null);
+          batch(() => {
+              count.update((value) => value + 1);
+              statusValue.set("loading");
+              error.set(null);
+          });
           emitRuntimeEvent({
               type: "action:start",
               timestamp: Date.now(),
@@ -690,8 +731,12 @@ var Ity = (function (exports) {
               .then((value) => {
               var _a;
               if (runGeneration === generation) {
-                  data.set(value);
-                  error.set(null);
+                  batch(() => {
+                      data.set(value);
+                      error.set(null);
+                      if (count.peek() <= 1)
+                          statusValue.set("success");
+                  });
                   emitRuntimeEvent({
                       type: "action:success",
                       timestamp: Date.now(),
@@ -699,15 +744,17 @@ var Ity = (function (exports) {
                       detail: { args, value }
                   });
                   (_a = options.onSuccess) === null || _a === void 0 ? void 0 : _a.call(options, value);
-                  if (count.peek() <= 1)
-                      statusValue.set("success");
               }
               return value;
           })
               .catch((err) => {
               var _a;
               if (runGeneration === generation) {
-                  error.set(err);
+                  batch(() => {
+                      error.set(err);
+                      if (count.peek() <= 1)
+                          statusValue.set("error");
+                  });
                   emitRuntimeEvent({
                       type: "action:error",
                       timestamp: Date.now(),
@@ -715,17 +762,17 @@ var Ity = (function (exports) {
                       detail: { args, error: err }
                   });
                   (_a = options.onError) === null || _a === void 0 ? void 0 : _a.call(options, err);
-                  if (count.peek() <= 1)
-                      statusValue.set("error");
               }
               throw err;
           })
               .finally(() => {
               if (runGeneration !== generation)
                   return;
-              count.update((value) => Math.max(0, value - 1));
-              if (count.peek() > 0)
-                  statusValue.set("loading");
+              batch(() => {
+                  count.update((value) => Math.max(0, value - 1));
+                  if (count.peek() > 0)
+                      statusValue.set("loading");
+              });
           });
       };
       const callable = ((...args) => submit(...args));
@@ -751,10 +798,12 @@ var Ity = (function (exports) {
       mutableCallable.status = status;
       callable.reset = () => {
           generation += 1;
-          data.set(undefined);
-          error.set(null);
-          count.set(0);
-          statusValue.set("idle");
+          batch(() => {
+              data.set(undefined);
+              error.set(null);
+              count.set(0);
+              statusValue.set("idle");
+          });
           emitRuntimeEvent({
               type: "action:reset",
               timestamp: Date.now(),
@@ -839,6 +888,7 @@ var Ity = (function (exports) {
       const errors = store({});
       const touched = store({});
       const registeredBindings = new Map();
+      const fieldCache = new Map();
       const allFieldNames = () => {
           const names = new Set();
           Reflect.ownKeys(initialValues.peek()).forEach((key) => names.add(String(key)));
@@ -1076,10 +1126,10 @@ var Ity = (function (exports) {
               if (Array.isArray(field.value())) {
                   const optionValue = bindOptions.value;
                   binding.value = optionValue === undefined ? "" : String(optionValue);
-                  binding[".checked"] = computed(() => field.value().some((item) => Object.is(item, optionValue)));
+                  binding[".checked"] = createDerivedSignal(() => field.value().some((item) => Object.is(item, optionValue)));
               }
               else {
-                  binding[".checked"] = computed(() => Boolean(field.value()));
+                  binding[".checked"] = createDerivedSignal(() => Boolean(field.value()));
                   binding.checked = Boolean(field.value());
               }
               return binding;
@@ -1087,7 +1137,7 @@ var Ity = (function (exports) {
           if (type === "radio") {
               const optionValue = bindOptions.value;
               binding.value = optionValue === undefined ? "" : String(optionValue);
-              binding[".checked"] = computed(() => Object.is(field.value(), optionValue));
+              binding[".checked"] = createDerivedSignal(() => Object.is(field.value(), optionValue));
               return binding;
           }
           if (type === "select-multiple") {
@@ -1107,8 +1157,11 @@ var Ity = (function (exports) {
           dirty: computed(() => !deepEqual(values.$snapshot(), initialValues())),
           valid: computed(() => Reflect.ownKeys(errors.$snapshot()).length === 0),
           field(name) {
+              const fieldName = String(name);
+              if (fieldCache.has(fieldName))
+                  return fieldCache.get(fieldName);
               const valueSignal = createFieldSignal(name);
-              return {
+              const field = {
                   value: valueSignal,
                   error: computed(() => errors[name] || null),
                   touched: computed(() => Boolean(touched[name])),
@@ -1125,6 +1178,8 @@ var Ity = (function (exports) {
                       delete touched[name];
                   }
               };
+              fieldCache.set(fieldName, field);
+              return field;
           },
           bind,
           set,
@@ -1169,7 +1224,7 @@ var Ity = (function (exports) {
   function html(strings, ...values) {
       return {
           isTemplateResult: true,
-          strings: Array.from(strings),
+          strings: Array.isArray(strings) ? strings : Array.from(strings),
           values
       };
   }
@@ -1205,10 +1260,15 @@ var Ity = (function (exports) {
       const resolvedItems = typeof items === "function"
           ? items()
           : resolveSignal(items);
-      const values = Array.from(resolvedItems || []).map((item, index) => ({
-          __ityRepeatKey: String(key(item, index)),
-          __ityRepeatValue: renderItem(item, index)
-      }));
+      const itemsList = resolvedItems || [];
+      const values = new Array(itemsList.length);
+      for (let index = 0; index < itemsList.length; index += 1) {
+          const item = itemsList[index];
+          values[index] = {
+              __ityRepeatKey: String(key(item, index)),
+              __ityRepeatValue: renderItem(item, index)
+          };
+      }
       const keys = new Set();
       for (const entry of values) {
           if (keys.has(entry.__ityRepeatKey)) {
@@ -1227,6 +1287,28 @@ var Ity = (function (exports) {
       const fragment = doc.createDocumentFragment();
       appendValue(fragment, normalizeValue(value), doc);
       return fragment;
+  }
+  function valueToText(value, doc = documentOrThrow()) {
+      value = normalizeValue(value);
+      if (value === null || value === undefined || value === false)
+          return "";
+      if (Array.isArray(value))
+          return value.map((item) => valueToText(item, doc)).join("");
+      if (isRepeatResult(value)) {
+          return value.values
+              .map((entry) => valueToText(entry.__ityRepeatValue, doc))
+              .join("");
+      }
+      if (isTemplateResult(value))
+          return materializeTemplate(value, doc).textContent || "";
+      if (isUnsafeHTML(value)) {
+          const template = doc.createElement("template");
+          template.innerHTML = value.value;
+          return template.content.textContent || "";
+      }
+      if (isNodeLike(value))
+          return value.textContent || "";
+      return String(value);
   }
   function applyRepeatKey(node, key) {
       if (node.nodeType === 1) {
@@ -1353,12 +1435,12 @@ var Ity = (function (exports) {
       }
       ensureManagedBindingMeta(element).props.set(name, value);
   }
-  function materializeTemplate(result, doc = documentOrThrow()) {
+  function compileTemplateBindings(strings, doc) {
       var _a, _b;
       const bindings = [];
       let source = "";
-      for (let i = 0; i < result.values.length; i += 1) {
-          const part = (_a = result.strings[i]) !== null && _a !== void 0 ? _a : "";
+      for (let i = 0; i < strings.length - 1; i += 1) {
+          const part = (_a = strings[i]) !== null && _a !== void 0 ? _a : "";
           const attrMatch = part.match(/([@.?]?[\w:-]+)\s*=\s*$/);
           if (attrMatch) {
               const rawName = attrMatch[1];
@@ -1373,44 +1455,121 @@ var Ity = (function (exports) {
               source += `${part}<!--ity:${i}-->`;
           }
       }
-      source += (_b = result.strings[result.strings.length - 1]) !== null && _b !== void 0 ? _b : "";
+      source += (_b = strings[strings.length - 1]) !== null && _b !== void 0 ? _b : "";
       const template = doc.createElement("template");
       template.innerHTML = source;
-      const fragment = template.content.cloneNode(true);
-      applyBindings(fragment, bindings, result.values, doc);
-      return fragment;
-  }
-  function applyBindings(root, bindings, values, doc) {
-      const comments = new Map();
-      const walker = doc.createTreeWalker(root, 128);
+      const commentBindings = new Map();
+      const walker = doc.createTreeWalker(template.content, 128);
       let current = walker.nextNode();
       while (current) {
           const comment = current;
           const match = comment.data.match(/^ity:(\d+)$/);
           if (match) {
-              const index = Number(match[1]);
-              const list = comments.get(index) || [];
-              list.push(comment);
-              comments.set(index, list);
+              commentBindings.set(Number(match[1]), comment);
           }
           current = walker.nextNode();
       }
-      for (const binding of bindings) {
-          const value = normalizeValue(values[binding.index]);
+      const textBindings = new Map();
+      const textWalker = doc.createTreeWalker(template.content, 4);
+      let textNode = textWalker.nextNode();
+      while (textNode) {
+          const text = textNode;
+          const markers = (text.data || "").match(/<!--ity:\d+-->/g) || [];
+          for (const markerText of markers) {
+              const match = markerText.match(/^<!--ity:(\d+)-->$/);
+              if (!match)
+                  continue;
+              const index = Number(match[1]);
+              if (!textBindings.has(index)) {
+                  textBindings.set(index, { node: text, markerText });
+              }
+          }
+          textNode = textWalker.nextNode();
+      }
+      const compiledBindings = bindings.map((binding) => {
           if (binding.kind === "node") {
-              const markers = comments.get(binding.index) || [];
-              for (const marker of markers) {
-                  marker.replaceWith(valueToFragment(value, doc));
+              const marker = commentBindings.get(binding.index);
+              const textBinding = textBindings.get(binding.index);
+              const path = marker
+                  ? captureNodePath(template.content, marker)
+                  : textBinding
+                      ? captureNodePath(template.content, textBinding.node)
+                      : null;
+              if (!path)
+                  throw new Error(`Ity failed to compile node binding ${binding.index}.`);
+              return {
+                  ...binding,
+                  path,
+                  markerText: textBinding === null || textBinding === void 0 ? void 0 : textBinding.markerText
+              };
+          }
+          const attrName = `data-ity-bind-${binding.index}`;
+          const element = template.content.querySelector(`[${attrName}]`);
+          const path = element ? captureNodePath(template.content, element) : null;
+          if (!element || !path)
+              throw new Error(`Ity failed to compile attribute binding ${binding.index}.`);
+          element.removeAttribute(attrName);
+          return { ...binding, path };
+      });
+      return {
+          template,
+          bindings: compiledBindings
+      };
+  }
+  function getCompiledTemplate(strings, doc) {
+      let compiled = templateCache.get(strings);
+      if (!compiled) {
+          compiled = {
+              bindings: [],
+              templates: new WeakMap()
+          };
+          templateCache.set(strings, compiled);
+      }
+      let template = compiled.templates.get(doc);
+      if (!template) {
+          const next = compileTemplateBindings(strings, doc);
+          template = next.template;
+          compiled.templates.set(doc, template);
+          if (compiled.bindings.length === 0) {
+              compiled.bindings = next.bindings;
+          }
+      }
+      return {
+          template,
+          bindings: compiled.bindings
+      };
+  }
+  function materializeTemplate(result, doc = documentOrThrow()) {
+      if (result.strings.length === 0) {
+          return valueToFragment(result.values, doc);
+      }
+      const { template, bindings } = getCompiledTemplate(result.strings, doc);
+      const fragment = template.content.cloneNode(true);
+      const targets = bindings.map((binding) => ({
+          binding,
+          node: resolveNodePath(fragment, binding.path)
+      }));
+      for (const target of targets) {
+          const value = normalizeValue(result.values[target.binding.index]);
+          if (target.binding.kind === "node") {
+              if (target.binding.markerText) {
+                  const textNode = target.node;
+                  if (textNode) {
+                      textNode.textContent = (textNode.textContent || "").replace(target.binding.markerText, valueToText(value, doc));
+                  }
+              }
+              else {
+                  const marker = target.node;
+                  if (marker)
+                      marker.replaceWith(valueToFragment(value, doc));
               }
               continue;
           }
-          const attrName = `data-ity-bind-${binding.index}`;
-          const elements = Array.from(root.querySelectorAll(`[${attrName}]`));
-          for (const element of elements) {
-              element.removeAttribute(attrName);
-              applyElementBinding(element, binding, value);
-          }
+          const element = target.node;
+          if (element)
+              applyElementBinding(element, target.binding, value);
       }
+      return fragment;
   }
   function applyElementBinding(element, binding, value) {
       const name = binding.name || "";
@@ -3166,7 +3325,7 @@ var Ity = (function (exports) {
       return router;
   }
   const Ity = {
-      version: "3.0.1",
+      version: "3.0.2",
       createConfig,
       configure,
       createScope,
