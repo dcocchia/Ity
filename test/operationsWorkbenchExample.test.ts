@@ -124,6 +124,55 @@ describe('Operations Workbench example', function () {
     cleanup();
   });
 
+  it('limits view transitions to router navigation instead of background workspace updates', async function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="operationsWorkbenchApp"></div>');
+    const rejections: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      rejections.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    let app: any;
+    try {
+      let transitionCalls = 0;
+      const skipped = () => Promise.reject(new DOMException('Transition was skipped', 'AbortError'));
+      (document as any).startViewTransition = (callback: any) => {
+        transitionCalls += 1;
+        callback();
+        return {
+          ready: skipped(),
+          finished: skipped()
+        };
+      };
+
+      window.history.pushState(null, '', '/lab/workbench/');
+      const createOperationsWorkbenchApp = loadWorkbenchExample();
+      app = createOperationsWorkbenchApp(loadWorkbenchRuntime(), {
+        target: '#operationsWorkbenchApp',
+        base: '/lab/workbench',
+        storage: createStorage(),
+        storageKey: 'ops-workbench-transitions',
+        modules: loadWorkbenchModules(),
+        latencyMs: 0
+      });
+
+      await waitForWorkspace(app);
+      assert.strictEqual(transitionCalls, 0);
+
+      const tasksLink = Array.from(document.querySelectorAll('.owbNavLink')).find((element) => element.textContent?.trim() === 'Tasks') as HTMLAnchorElement;
+      tasksLink.click();
+      await flush();
+
+      assert.strictEqual(app.router.current().path, '/tasks');
+      assert.strictEqual(transitionCalls, 1);
+      assert.deepStrictEqual(rejections, []);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      delete (document as any).startViewTransition;
+      if (app) app.dispose();
+      cleanup();
+    }
+  });
+
   it('creates a new task and navigates straight into the detail route', async function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="operationsWorkbenchApp"></div>');
     window.history.pushState(null, '', '/lab/workbench/tasks/new');

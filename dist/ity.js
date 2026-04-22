@@ -1836,7 +1836,21 @@ var Ity = (function (exports) {
   function withViewTransition(update, enabled) {
       const doc = getDocument();
       if (enabled && doc && typeof doc.startViewTransition === "function") {
-          doc.startViewTransition(update);
+          const transition = doc.startViewTransition(update);
+          if (transition && typeof transition === "object") {
+              const promises = ["ready", "finished", "updateCallbackDone"]
+                  .map((key) => transition[key])
+                  .filter((value) => value && typeof value.then === "function");
+              for (const promise of promises) {
+                  promise.catch((error) => {
+                      const name = typeof error === "object" && error ? String(error.name || "") : "";
+                      const message = error instanceof Error ? error.message : String(error || "");
+                      if (name === "AbortError" || /transition was skipped/i.test(message))
+                          return;
+                      warnRuntime("view-transition", "An Ity view transition failed.", error);
+                  });
+              }
+          }
       }
       else {
           update();

@@ -2408,7 +2408,7 @@
           </main>
         </div>
       `;
-    }, target, { transition: true, config: htmlConfig, scope: appScope });
+    }, target, { config: htmlConfig, scope: appScope });
 
     router.start();
 

@@ -228,6 +228,65 @@ describe('V2 DOM templates and rendering', function () {
     cleanup();
   });
 
+  it('ignores skipped view transition promise rejections', async function () {
+    const cleanup = setupDOM('<!DOCTYPE html><main id="root"></main>');
+    const rejections: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      rejections.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const skipped = () => Promise.reject(new DOMException('Transition was skipped', 'AbortError'));
+      (document as any).startViewTransition = (callback: any) => {
+        callback();
+        return {
+          ready: skipped(),
+          finished: skipped(),
+          updateCallbackDone: Promise.resolve()
+        };
+      };
+
+      window.Ity.render(window.Ity.html`<p>Transitioned</p>`, '#root', { reactive: false, transition: true });
+      await flush();
+
+      assert.deepStrictEqual(rejections, []);
+      assert.equal(document.querySelector('p')?.textContent, 'Transitioned');
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      delete (document as any).startViewTransition;
+      cleanup();
+    }
+  });
+
+  it('warns when view transitions fail unexpectedly', async function () {
+    const cleanup = setupDOM('<!DOCTYPE html><main id="root"></main>');
+    const warnings: any[] = [];
+    try {
+      window.Ity.configure({
+        onWarning(warning: any) {
+          warnings.push(warning);
+        }
+      });
+      (document as any).startViewTransition = (callback: any) => {
+        callback();
+        return {
+          finished: Promise.reject(new Error('view transition exploded'))
+        };
+      };
+
+      window.Ity.render(window.Ity.html`<p>Transitioned</p>`, '#root', { reactive: false, transition: true });
+      await flush();
+
+      assert.strictEqual(warnings.length, 1);
+      assert.strictEqual(warnings[0].code, 'view-transition');
+      assert.match(warnings[0].message, /view transition failed/i);
+    } finally {
+      window.Ity.configure({ onWarning: null });
+      delete (document as any).startViewTransition;
+      cleanup();
+    }
+  });
+
   it('renders templates to escaped strings for SSR and static output', function () {
     const cleanup = setupDOM();
     const title = window.Ity.signal('<Admin>');

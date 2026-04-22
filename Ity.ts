@@ -2225,7 +2225,20 @@ function replaceChildren(target: Element | DocumentFragment, fragment: DocumentF
 function withViewTransition(update: () => void, enabled: boolean | undefined): void {
   const doc = getDocument() as any;
   if (enabled && doc && typeof doc.startViewTransition === "function") {
-    doc.startViewTransition(update);
+    const transition = doc.startViewTransition(update);
+    if (transition && typeof transition === "object") {
+      const promises = ["ready", "finished", "updateCallbackDone"]
+        .map((key) => transition[key])
+        .filter((value) => value && typeof value.then === "function") as Promise<unknown>[];
+      for (const promise of promises) {
+        promise.catch((error) => {
+          const name = typeof error === "object" && error ? String((error as any).name || "") : "";
+          const message = error instanceof Error ? error.message : String(error || "");
+          if (name === "AbortError" || /transition was skipped/i.test(message)) return;
+          warnRuntime("view-transition", "An Ity view transition failed.", error);
+        });
+      }
+    }
   } else {
     update();
   }
