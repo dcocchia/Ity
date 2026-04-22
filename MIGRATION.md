@@ -1,6 +1,6 @@
 # Ity Migration Guide
 
-This guide covers upgrading older Ity applications to Ity 3.0.0.
+This guide covers upgrading older Ity applications to Ity 4.0.0.
 
 Ity 3 keeps the original goal of a tiny dependency-free browser app library,
 but the primary programming model is now reactive and platform-native. The V1
@@ -12,7 +12,7 @@ forms, and React interop.
 ## Install
 
 ```bash
-npm install ity@^3.0.0
+npm install ity@^4.0.0
 ```
 
 ```ts
@@ -100,6 +100,32 @@ const snapshot = state.$snapshot();
 ```
 
 In 2.1+, `store` tracks structural changes. Effects and subscribers that read snapshots are notified when keys are added or deleted, not just when existing values change.
+
+## New In 4.0
+
+### Security hardening and explicit HTML sinks
+
+Ity 4 tightens the default rendering contract:
+
+- Template bindings now block inline handler attributes such as `onclick=${"..."}`
+  and strip unsafe URL schemes from URL-bearing attrs and properties.
+- HTML sinks such as `srcdoc`, `.innerHTML`, and `.outerHTML` require
+  `unsafeHTML(...)` when you intentionally want trusted markup to be parsed.
+- `SelectorObject` string insertion is now text-by-default. Legacy code that
+  relied on `append("<div>...")` parsing HTML must switch to
+  `append(Ity.unsafeHTML("<div>..."))`.
+
+Examples:
+
+```ts
+Ity.html`<iframe srcdoc=${Ity.unsafeHTML(trustedMarkup)}></iframe>`;
+
+view.select(".panel").html(Ity.unsafeHTML("<strong>Trusted</strong>"));
+```
+
+If your app already sanitizes user-generated rich text, keep doing that and
+pass the sanitized output through `unsafeHTML(...)` at the final render
+boundary.
 
 ## New In 3.0
 

@@ -585,6 +585,7 @@
     const doc = browserWindow?.document;
     if (!doc) return String(value).replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
     const template = doc.createElement('template');
+    const blockedNavigationProtocols = /^(?:javascript|vbscript|data):/i;
     template.innerHTML = String(value);
     const blocked = template.content.querySelectorAll('script, style, iframe, object, embed, link, meta');
     blocked.forEach((node: Element) => node.remove());
@@ -596,7 +597,15 @@
           node.removeAttribute(attribute.name);
           return;
         }
-        if ((name === 'href' || name === 'src') && /^javascript:/i.test(rawValue)) {
+        if (name === 'srcdoc') {
+          node.removeAttribute(attribute.name);
+          return;
+        }
+        if ((name === 'href' || name === 'action' || name === 'formaction' || name === 'xlink:href' || name === 'data') && blockedNavigationProtocols.test(rawValue)) {
+          node.removeAttribute(attribute.name);
+          return;
+        }
+        if ((name === 'src' || name === 'poster') && /^(?:javascript|vbscript):/i.test(rawValue)) {
           node.removeAttribute(attribute.name);
           return;
         }

@@ -1,4 +1,4 @@
-// Ity.ts 3.0.2
+// Ity.ts 4.0.0
 // (c) 2026 Dominic Cocchiarella
 // Tiny dependency-free reactive app kernel with V1 MVC compatibility.
 declare var define: any;
@@ -1747,11 +1747,112 @@ interface FocusRestoreState {
   selection: FocusSelectionState | null;
 }
 
+const URL_SINK_ATTRIBUTE_NAMES = new Set([
+  "action",
+  "data",
+  "formaction",
+  "href",
+  "poster",
+  "src",
+  "xlink:href"
+]);
+
+const URL_SINK_PROPERTY_ALIASES = new Map([
+  ["action", "action"],
+  ["data", "data"],
+  ["formaction", "formaction"],
+  ["href", "href"],
+  ["poster", "poster"],
+  ["src", "src"],
+  ["xlinkhref", "xlink:href"]
+]);
+
+const HTML_SINK_PROPERTY_NAMES = new Set([
+  "innerhtml",
+  "outerhtml",
+  "srcdoc"
+]);
+
+const CONTROL_AND_WHITESPACE_RE = /[\u0000-\u001F\u007F\s]+/g;
+
 function bindingFromName(rawName: string): Pick<Binding, "kind" | "name"> {
   const first = rawName[0];
   const kind = first === "@" ? "event" : first === "." ? "prop" : first === "?" ? "bool" : "attr";
   const name = kind === "attr" ? rawName : rawName.slice(1);
   return { kind, name };
+}
+
+function normalizeSinkName(name: string): string {
+  return String(name).toLowerCase();
+}
+
+function isInlineHandlerSink(name: string): boolean {
+  return /^on/i.test(name);
+}
+
+function resolveURLSinkName(name: string): string | null {
+  const lower = normalizeSinkName(name);
+  if (URL_SINK_ATTRIBUTE_NAMES.has(lower)) return lower;
+  return URL_SINK_PROPERTY_ALIASES.get(lower) || null;
+}
+
+function isAllowedDataURL(name: string, value: string): boolean {
+  if (name === "src") {
+    return /^data:image\/(?:apng|avif|bmp|gif|jpe?g|png|webp)/.test(value)
+      || /^data:(?:audio|video)\//.test(value);
+  }
+  if (name === "poster") {
+    return /^data:image\/(?:apng|avif|bmp|gif|jpe?g|png|webp)/.test(value);
+  }
+  return false;
+}
+
+function isUnsafeURLValue(name: string, value: string): boolean {
+  const normalized = value.replace(CONTROL_AND_WHITESPACE_RE, "").toLowerCase();
+  if (/^(?:javascript|vbscript):/.test(normalized)) return true;
+  if (/^data:/.test(normalized)) {
+    return !isAllowedDataURL(name, normalized);
+  }
+  return false;
+}
+
+function sanitizeURLSinkValue(name: string, value: string, sink: string): string | null {
+  if (!isUnsafeURLValue(name, value)) return value;
+  warnRuntime("unsafe-url", `Ity blocked an unsafe URL assigned to ${sink}.`, {
+    sink,
+    name,
+    value
+  });
+  return null;
+}
+
+function sanitizeHTMLSinkValue(name: string, value: unknown, sink: string): string | null {
+  if (value === false || value === null || value === undefined) return null;
+  if (isUnsafeHTML(value)) return value.value;
+  warnRuntime("unsafe-html-sink", `Ity escaped a plain string assigned to the HTML sink ${sink}. Wrap trusted markup with unsafeHTML() to opt in.`, {
+    sink,
+    name,
+    value
+  });
+  return escapeHTML(value === true ? "" : String(value));
+}
+
+function sanitizeAttributeValue(name: string, value: unknown, sink: string): string | null {
+  const lower = normalizeSinkName(name);
+  if (isInlineHandlerSink(lower)) {
+    warnRuntime("unsafe-attr", `Ity blocked the inline event attribute "${name}" on ${sink}. Use @event bindings instead.`, {
+      sink,
+      name,
+      value
+    });
+    return null;
+  }
+  if (lower === "srcdoc") {
+    return sanitizeHTMLSinkValue(name, value, sink);
+  }
+  const serialized = stringifyAttribute(name, value);
+  const urlSink = resolveURLSinkName(lower);
+  return urlSink ? sanitizeURLSinkValue(urlSink, serialized, sink) : serialized;
 }
 
 function readManagedBindingMeta(element: HTMLElement): ManagedBindingMeta | null {
@@ -1807,6 +1908,40 @@ function applyEventBinding(element: HTMLElement, name: string, value: unknown): 
 }
 
 function applyPropertyBinding(element: HTMLElement, name: string, value: unknown): void {
+  const lower = normalizeSinkName(name);
+  if (isInlineHandlerSink(lower)) {
+    if (value === null || value === undefined || value === false) {
+      (element as any)[name] = null;
+    } else if (typeof value === "function") {
+      (element as any)[name] = value;
+    } else {
+      warnRuntime("unsafe-prop", `Ity blocked the event property ".${name}" because it was not a function.`, {
+        name,
+        value
+      });
+      (element as any)[name] = null;
+    }
+    ensureManagedBindingMeta(element).props.set(name, value);
+    return;
+  }
+
+  if (HTML_SINK_PROPERTY_NAMES.has(lower)) {
+    (element as any)[name] = sanitizeHTMLSinkValue(name, value, `.${name}`) ?? "";
+    ensureManagedBindingMeta(element).props.set(name, value);
+    return;
+  }
+
+  const urlSink = resolveURLSinkName(lower);
+  if (urlSink) {
+    if (value === null || value === undefined || value === false) {
+      (element as any)[name] = "";
+    } else {
+      (element as any)[name] = sanitizeURLSinkValue(urlSink, String(value), `.${name}`) ?? "";
+    }
+    ensureManagedBindingMeta(element).props.set(name, value);
+    return;
+  }
+
   if (name === "value" && Array.isArray(value) && element.tagName === "SELECT" && (element as HTMLSelectElement).multiple) {
     const selectedValues = new Set(value.map((entry) => String(entry)));
     Array.from((element as HTMLSelectElement).options).forEach((option) => {
@@ -1983,6 +2118,14 @@ function applyElementBinding(element: HTMLElement, binding: Binding, value: unkn
   }
 
   if (binding.kind === "bool") {
+    if (isInlineHandlerSink(name)) {
+      warnRuntime("unsafe-attr", `Ity blocked the inline event attribute "${name}" on a boolean binding. Use @event bindings instead.`, {
+        name,
+        value
+      });
+      element.removeAttribute(name);
+      return;
+    }
     element.toggleAttribute(name, Boolean(value));
     return;
   }
@@ -2014,7 +2157,12 @@ function applyElementBinding(element: HTMLElement, binding: Binding, value: unkn
     return;
   }
 
-  element.setAttribute(name, value === true ? "" : String(value));
+  const sanitized = sanitizeAttributeValue(name, value, `attribute "${name}"`);
+  if (sanitized === null) {
+    element.removeAttribute(name);
+    return;
+  }
+  element.setAttribute(name, sanitized);
 }
 
 function getDeepActiveElement(doc: Document | undefined): HTMLElement | null {
@@ -2513,6 +2661,13 @@ function templateToString(result: TemplateResult): string {
           const entryName = entry.name || "";
           if (entry.kind === "event" || entryValue === false || entryValue === null || entryValue === undefined) continue;
           if (entry.kind === "bool") {
+            if (isInlineHandlerSink(entryName)) {
+              warnRuntime("unsafe-attr", `Ity blocked the inline event attribute "${entryName}" during renderToString(). Use @event bindings instead.`, {
+                name: entryName,
+                value: entryValue
+              });
+              continue;
+            }
             if (entryValue) serialized.push(entryName);
             continue;
           }
@@ -2528,7 +2683,9 @@ function templateToString(result: TemplateResult): string {
             serialized.push(`data-ity-key="${escapeAttribute(String(entryValue))}"`);
             continue;
           }
-          serialized.push(`${entryName}="${escapeAttribute(stringifyAttribute(entryName, entryValue))}"`);
+          const sanitized = sanitizeAttributeValue(entryName, entryValue, `renderToString("${entryName}")`);
+          if (sanitized === null) continue;
+          serialized.push(`${entryName}="${escapeAttribute(sanitized)}"`);
         }
         source += serialized.length ? `${before}${serialized.join(" ")}` : before;
         continue;
@@ -2536,11 +2693,22 @@ function templateToString(result: TemplateResult): string {
       if (kind === "event" || kind === "prop" || value === false || value === null || value === undefined) {
         source += before;
       } else if (kind === "bool") {
-        source += value ? `${before}${name}` : before;
+        if (name && isInlineHandlerSink(name)) {
+          if (value) {
+            warnRuntime("unsafe-attr", `Ity blocked the inline event attribute "${name}" during renderToString(). Use @event bindings instead.`, {
+              name,
+              value
+            });
+          }
+          source += before;
+        } else {
+          source += value ? `${before}${name}` : before;
+        }
       } else if (kind === "attr" && name === "key") {
         source += `${before}data-ity-key="${escapeAttribute(String(value))}"`;
       } else {
-        source += `${before}${name || ""}="${escapeAttribute(stringifyAttribute(name || "", value))}"`;
+        const sanitized = sanitizeAttributeValue(name || "", value, `renderToString("${name || ""}")`);
+        source += sanitized === null ? before : `${before}${name || ""}="${escapeAttribute(sanitized)}"`;
       }
     } else {
       source += part + valueToString(value);
@@ -2960,7 +3128,11 @@ class SelectorObject {
     if (arguments.length === 1) return this.nodes[0]?.getAttribute(name) ?? null;
     for (const node of this.nodes) {
       if (value === null || value === false || value === undefined) node.removeAttribute(name);
-      else node.setAttribute(name, value === true ? "" : String(value));
+      else {
+        const sanitized = sanitizeAttributeValue(name, value, "SelectorObject.attr()");
+        if (sanitized === null) node.removeAttribute(name);
+        else node.setAttribute(name, sanitized);
+      }
     }
     return this;
   }
@@ -2981,23 +3153,23 @@ class SelectorObject {
     return this;
   }
 
-  before(content: string | SelectorObject | HTMLElement | TemplateResult): this {
+  before(content: string | SelectorObject | HTMLElement | TemplateResult | UnsafeHTML): this {
     return this._html(content, "beforebegin");
   }
 
-  after(content: string | SelectorObject | HTMLElement | TemplateResult): this {
+  after(content: string | SelectorObject | HTMLElement | TemplateResult | UnsafeHTML): this {
     return this._html(content, "afterend");
   }
 
-  append(content: string | SelectorObject | HTMLElement | TemplateResult): this {
+  append(content: string | SelectorObject | HTMLElement | TemplateResult | UnsafeHTML): this {
     return this._html(content, "beforeend");
   }
 
-  prepend(content: string | SelectorObject | HTMLElement | TemplateResult): this {
+  prepend(content: string | SelectorObject | HTMLElement | TemplateResult | UnsafeHTML): this {
     return this._html(content, "afterbegin");
   }
 
-  html(content?: string | SelectorObject | HTMLElement | TemplateResult): this | string {
+  html(content?: string | SelectorObject | HTMLElement | TemplateResult | UnsafeHTML): this | string {
     if (arguments.length === 0) return this.nodes[0]?.innerHTML ?? "";
     return this._html(content!, "replace");
   }
@@ -3007,25 +3179,31 @@ class SelectorObject {
     return this;
   }
 
-  private _html(content: string | SelectorObject | HTMLElement | TemplateResult, position: InsertPosition | "replace"): this {
-    const doc = getDocument();
+  private _html(content: string | SelectorObject | HTMLElement | TemplateResult | UnsafeHTML, position: InsertPosition | "replace"): this {
     for (const node of this.nodes) {
+      const doc = node.ownerDocument || getDocument();
+      if (!doc) continue;
+      const fragment = doc.createDocumentFragment();
       if ((content as SelectorObject)?.isSelectorObject) {
-        const htmls = Array.from(content as SelectorObject).map((selNode) => selNode.outerHTML).join("");
-        if (position === "replace") node.innerHTML = htmls;
-        else node.insertAdjacentHTML(position as InsertPosition, htmls);
-      } else if (isTemplateResult(content) && doc) {
-        const fragment = materializeTemplate(content, doc);
-        if (position === "replace") replaceChildren(node, fragment);
-        else node.insertAdjacentElement(position as InsertPosition, fragmentToElement(fragment, doc));
+        for (const selNode of content as SelectorObject) {
+          fragment.appendChild(selNode.cloneNode(true));
+        }
+      } else if (isTemplateResult(content)) {
+        fragment.appendChild(materializeTemplate(content, doc));
+      } else if (isUnsafeHTML(content)) {
+        const template = doc.createElement("template");
+        template.innerHTML = content.value;
+        fragment.appendChild(template.content.cloneNode(true));
       } else if (isNodeLike(content)) {
-        const cloned = content.cloneNode(true) as HTMLElement;
-        if (position === "replace") replaceChildren(node, valueToFragment(cloned, doc || node.ownerDocument));
-        else node.insertAdjacentElement(position as InsertPosition, cloned);
+        fragment.appendChild(content.cloneNode(true));
       } else {
-        const htmlContent = String(content);
-        if (position === "replace") node.innerHTML = htmlContent;
-        else node.insertAdjacentHTML(position as InsertPosition, htmlContent);
+        fragment.appendChild(doc.createTextNode(String(content)));
+      }
+
+      if (position === "replace") {
+        replaceChildren(node, fragment, { mode: "replace" });
+      } else {
+        insertFragment(node, fragment, position as InsertPosition);
       }
     }
     return this;
@@ -3045,6 +3223,23 @@ function fragmentToElement(fragment: DocumentFragment, doc: Document): HTMLEleme
   const span = doc.createElement("span");
   span.appendChild(fragment);
   return span;
+}
+
+function insertFragment(target: Element, fragment: DocumentFragment, position: InsertPosition): void {
+  switch (position) {
+    case "beforebegin":
+      target.parentNode?.insertBefore(fragment, target);
+      break;
+    case "afterbegin":
+      target.insertBefore(fragment, target.firstChild);
+      break;
+    case "beforeend":
+      target.appendChild(fragment);
+      break;
+    case "afterend":
+      target.parentNode?.insertBefore(fragment, target.nextSibling);
+      break;
+  }
 }
 
 function onDOMReady(fn: (...args: any[]) => void, args: unknown[] = [], context: any = Ity): void {
@@ -3868,7 +4063,7 @@ function route(pattern: string, handler: RouteHandler): Router {
 }
 
 const Ity = {
-  version: "3.0.2",
+  version: "4.0.0",
   createConfig,
   configure,
   createScope,

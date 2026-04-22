@@ -13,7 +13,7 @@ describe('Additional coverage for html and onDOMReady', function () {
   it('inserts HTML when not replacing and not SelectorObject', function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="t"></div>');
     const target = new window.Ity.SelectorObject([document.getElementById('t')]);
-    target.append('<span id="x"></span>');
+    target.append(window.Ity.unsafeHTML('<span id="x"></span>'));
     assert.strictEqual(document.querySelector('#t span#x')?.tagName, 'SPAN');
     cleanup();
   });

@@ -51,21 +51,24 @@ Ity 3.0.0 expands the kernel without changing its native-first design:
   [Examples/OperationsWorkbench/index.html](Examples/OperationsWorkbench/index.html)
   example now uses the v3 kernel and companion modules together.
 
-## What's New In 3.0.2
+## What's New In 4.0.0
 
-Ity 3.0.2 is a performance-focused patch release with no intended API breaks:
+Ity 4.0.0 is a security-hardening major release:
 
-* Core template rendering now caches compiled binding plans across reactive
-  rerenders, which reduces repeated fragment scanning and binding lookup work.
-* `resource()`, `action()`, and `ity/query` batch their internal state writes
-  more aggressively, and query-level `gcTime` overrides now apply correctly.
-* `formState()` and `ity/forms` reuse field handles, avoid stringify-based deep
-  equality checks, and clone only the nested paths that actually changed.
-* The Operations Workbench example no longer reloads the workspace when opening
-  task detail routes and now reuses unchanged task identities and task-card
-  action handlers to reduce list churn during mutations.
-* `npm run perf:bench` now runs a jsdom benchmark harness against both focused
-  kernel scenarios and the Operations Workbench example.
+* Safe template bindings now block inline handler attributes and strip unsafe
+  URL schemes such as `javascript:` and `vbscript:` from URL-bearing
+  attributes and properties.
+* HTML-parsing sinks such as `srcdoc` and `.innerHTML` now require an explicit
+  `unsafeHTML(...)` boundary so trusted markup stays deliberate.
+* `SelectorObject` string insertion is now text-by-default. Use
+  `Ity.unsafeHTML(...)` if you intentionally want `append`, `prepend`, `html`,
+  `before`, or `after` to parse trusted HTML strings.
+* SSR output from `renderToString()` now uses the same sink protections as the
+  browser renderer, which removes a client/server consistency gap for unsafe
+  attrs.
+* The Operations Workbench example sanitizer now blocks additional rich-text
+  attack vectors such as `srcdoc`, `xlink:href`, and protocol-based `data:`
+  navigation payloads.
 
 ## Installation
 
@@ -486,6 +489,11 @@ Ity does not bundle a sanitizer. Sanitization policy depends on the content
 source and threat model, and most production apps already standardize that
 choice separately.
 
+Safe bindings also block inline handler attributes such as `onclick=${"..."}`
+and strip dangerous URL schemes such as `javascript:` from URL-bearing
+attributes. If you intentionally need HTML-parsing sinks like `srcdoc` or
+`.innerHTML`, pass `Ity.unsafeHTML(...)` so the boundary stays explicit.
+
 ### Render Options
 
 ```ts
@@ -685,6 +693,10 @@ Supported methods include `find`, `filter`, `first`, `last`, `parent`,
 `children`, `remove`, `before`, `after`, `append`, `prepend`, `html`,
 `empty`, `attr`, `text`, `on`, `off`, `addClass`, `removeClass`,
 `toggleClass`, `hasClass`, and `toArray`.
+
+Selector string insertion is text-by-default. Use `Ity.unsafeHTML(...)` when
+you intentionally want `append`, `prepend`, `before`, `after`, or `html` to
+parse a trusted HTML string.
 
 ## Build
 

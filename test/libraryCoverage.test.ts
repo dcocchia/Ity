@@ -216,7 +216,8 @@ describe('Library coverage expansion', function () {
     assert.strictEqual(target[0].querySelector('section')?.textContent, 'node');
     target.after(document.createElement('footer'));
     target.after('<small>string</small>');
-    assert.strictEqual(document.querySelector('small')?.textContent, 'string');
+    assert.strictEqual(target[0].nextSibling?.textContent, '<small>string</small>');
+    assert.strictEqual(target[0].nextSibling?.nextSibling?.tagName, 'FOOTER');
     cleanup();
   });
 
@@ -645,7 +646,7 @@ describe('Library coverage expansion', function () {
     const selector = new window.Ity.SelectorObject([root]);
     selector.html('string replace');
     assert.strictEqual(root.innerHTML, 'string replace');
-    selector.html('<span>html getter</span>');
+    selector.html(window.Ity.unsafeHTML('<span>html getter</span>'));
     assert.strictEqual(selector.html(), '<span>html getter</span>');
     selector.html(undefined as any);
     assert.strictEqual(root.innerHTML, 'undefined');

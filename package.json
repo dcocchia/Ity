@@ -1,6 +1,6 @@
 {
   "name": "ity",
-  "version": "3.0.2",
+  "version": "4.0.0",
   "description": "A tiny runtime-dependency-free reactive app kernel with native-first v3 bridges for larger browser applications",
   "main": "dist/ity.cjs.js",
   "module": "dist/ity.esm.mjs",
