@@ -126,6 +126,7 @@ describe('Query module', function () {
 
     await current.refresh();
     assert.strictEqual(current.stale(), false);
+    assert.ok(current.updatedAt() > 0);
 
     client.setData(['settings', { scope: 'all' }], (previous: any) => ({ version: previous.version + 10 }));
     assert.strictEqual(current.data().version, 11);
