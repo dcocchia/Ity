@@ -1,13 +1,18 @@
 # Ity Migration Guide
 
-This guide covers upgrading older Ity applications to Ity 2.2.0.
+This guide covers upgrading older Ity applications to Ity 3.0.0.
 
-Ity 2 keeps the original goal of a tiny dependency-free browser app library, but the primary programming model is now reactive and platform-native. The V1 MVC classes still ship for compatibility, so migration can be incremental instead of a rewrite.
+Ity 3 keeps the original goal of a tiny dependency-free browser app library,
+but the primary programming model is now reactive and platform-native. The V1
+MVC classes still ship for compatibility, so migration can be incremental
+instead of a rewrite. V3 adds keyed rendering, hydration-friendly updates,
+scopes, runtime observation, and optional companion modules for queries, richer
+forms, and React interop.
 
 ## Install
 
 ```bash
-npm install ity@^2.2.0
+npm install ity@^3.0.0
 ```
 
 ```ts
@@ -15,6 +20,9 @@ import Ity, { signal, html, render } from "ity";
 ```
 
 Browser builds remain available through `dist/ity.js` and `dist/ity.min.js`.
+Companion modules are published as `ity/query`, `ity/forms`, and `ity/react`.
+The first two remain runtime-dependency-free; `ity/react` expects `react` in
+the consuming application.
 
 ## What Changed In 2.x
 
@@ -24,6 +32,9 @@ Browser builds remain available through `dist/ity.js` and `dist/ity.min.js`.
 - Components are native custom elements through `component()`.
 - Routing is handled by `Router` and `route()`, with base-path support, route cleanup, same-origin link interception, and URLPattern fallback.
 - Async UI state can use `resource`, `action`, `form`, and `formState`.
+- App-scale flows can opt into `repeat`, `hydrate`, `createScope`,
+  `observeRuntime`, `Router.resource`, `Router.action`, `ity/query`,
+  `ity/forms`, and `ity/react`.
 - V1 `Application`, `Model`, `Collection`, `View`, and `SelectorObject` remain available.
 
 ## V1 MVC To V2 Reactivity
@@ -89,6 +100,53 @@ const snapshot = state.$snapshot();
 ```
 
 In 2.1+, `store` tracks structural changes. Effects and subscribers that read snapshots are notified when keys are added or deleted, not just when existing values change.
+
+## New In 3.0
+
+### Keyed rendering and hydration
+
+Use `repeat()` when DOM identity matters, and `hydrate()` when the page already
+contains markup that should be activated instead of replaced:
+
+```ts
+Ity.render(() => Ity.html`
+  <ul>
+    ${Ity.repeat(tasks(), (task) => task.id, (task) => Ity.html`<li>${task.title}</li>`)}
+  </ul>
+`, "#app");
+
+Ity.hydrate(() => Ity.html`
+  <button @click=${handleClick}>Hydrated</button>
+`, "#app");
+```
+
+### Scopes and runtime observation
+
+Scopes are the v3 answer to lightweight dependency flow:
+
+```ts
+const scope = Ity.createScope({ name: "app" });
+scope.provide("apiBase", "/api");
+```
+
+Use `observeRuntime()` to watch runtime activity while building tooling or
+debugging larger screens:
+
+```ts
+const stop = Ity.observeRuntime((event) => {
+  console.log(event.type, event.name);
+});
+```
+
+### Companion modules
+
+The core stays small. Larger app needs now live behind optional subpath imports:
+
+```ts
+import { createQueryClient, query, mutation } from "ity/query";
+import { createFormKit } from "ity/forms";
+import { wrapCustomElement } from "ity/react";
+```
 
 ## Template Safety
 
@@ -219,12 +277,12 @@ Ity.render(() => Ity.html`
 `, "#app");
 ```
 
-`action.run()`, `action.with()`, `action.from()`, and `form.handleSubmit()` are
-also new in 2.2.0 for direct DOM event wiring without unhandled rejections.
+`action.run()`, `action.with()`, `action.from()`, and `form.handleSubmit()`
+remain the preferred direct DOM wiring helpers in 3.0.0.
 
 ## Router Migration
 
-V2 routing uses explicit route registration:
+V2+ routing uses explicit route registration:
 
 ```ts
 const router = new Ity.Router({ base: "/app" });
@@ -273,7 +331,8 @@ Ity.component("user-card", {
 
 Component render effects and `ctx.effect()` handlers are disposed when the element disconnects and restarted when it reconnects. This prevents stale subscriptions while preserving component state.
 
-In 2.2.0, components can also declare structured props:
+In 3.0.0, components can also declare structured props and consume scoped
+services:
 
 ```ts
 Ity.component("user-card", {
@@ -288,21 +347,26 @@ Ity.component("user-card", {
 
 ## Packaging Notes
 
-Ity 2.2.0 publishes:
+Ity 3.0.0 publishes:
 
 - ESM: `dist/ity.esm.mjs` and `dist/ity.esm.js`.
 - CommonJS: `dist/ity.cjs.js`.
 - Browser IIFE: `dist/ity.js`.
 - Minified browser IIFE: `dist/ity.min.js`.
 - Types: `dist/ity.d.ts`.
+- Companion modules:
+  - `ity/query`
+  - `ity/forms`
+  - `ity/react`
 
 The package `exports` map supports ESM, CommonJS, browser-aware bundlers, and `ity/browser` for direct browser bundle consumers.
 
 ## Recommended Upgrade Path
 
-1. Upgrade to Ity 2.2.0 and run the existing test suite without changing application code.
+1. Upgrade to Ity 3.0.0 and run the existing test suite without changing application code.
 2. Replace manual HTML string rendering with `html` templates at active maintenance boundaries.
 3. Introduce signals for new state and bridge old models through their `state` signals.
 4. Move async screens to `resource`, submit handlers to `action`, and complex forms to `formState`.
 5. Convert route links to `router.link()` where base paths or shadow DOM are involved.
 6. Convert route entry points to return cleanup functions, especially if they mount renders, subscribe to signals, or start network work.
+7. Adopt `repeat()`, `createScope()`, `ity/query`, or `ity/forms` only where the app genuinely needs them. The core APIs remain valid.

@@ -1,48 +1,55 @@
 # Ity
 
 A tiny dependency-free reactive app kernel for small browser apps, embeddable
-widgets, and progressive SPAs.
+widgets, progressive SPAs, and local-first browser applications.
 
-Ity 2 keeps the original Ity goal: do useful client-side app work without a
-framework stack, runtime dependencies, or a large bundle. The primary API is now
-reactive and platform-native: signals, computed values, effects, tagged HTML
-templates, Web Components, and a modern router. The original MVC classes are
-still included as a compatibility layer.
+Ity 3 keeps the original Ity goal: do useful client-side app work without a
+framework stack, runtime dependencies, or a large bundle. The core stays
+platform-native and explicit: signals, computed values, effects, tagged HTML
+templates, DOM rendering, Web Components, and a modern router. V3 adds a small
+set of app-scale primitives and optional companion modules without trying to
+recreate React inside the core.
 
-## Why Ity 2?
+## Why Ity 3?
 
-* Tiny runtime, no production dependencies.
+* Tiny runtime, no production dependencies in the core or companion modules.
 * Fine-grained reactive state with `signal`, `computed`, `effect`, and `store`.
-* Async UI primitives with `resource`, `action`, and `form`.
+* Async UI primitives with `resource`, `action`, `form`, and `formState`.
 * Safe-by-default DOM templates: dynamic values become text unless explicitly
   marked with `unsafeHTML`.
 * Native Web Component support via `component()`.
 * SPA routing with URLPattern support when available and a regex fallback when
   it is not.
-* Static/SSR string output through `renderToString`.
+* Keyed structural rendering with `repeat()`.
+* Static and hydration-friendly output through `renderToString()` and
+  `hydrate()`.
+* Scoped dependency flow through `createScope()`, `ctx.provide()`, and
+  `ctx.inject()`.
+* Runtime observability through `observeRuntime()`.
 * Optional View Transition integration for same-document route/render updates.
+* Optional app-scale companion modules: `ity/query`, `ity/forms`, and
+  `ity/react`.
 * V1-compatible `Model`, `Collection`, `View`, `Application`, and
   `SelectorObject`.
 
-## What's New In 2.2.0
+## What's New In 3.0.0
 
-Ity 2.2.0 turns the V2 kernel into a more complete application layer:
+Ity 3.0.0 expands the kernel without changing its native-first design:
 
-* `formState()` for field binding, dirty/touched tracking, validation, reset,
-  and validated submits.
-* `createConfig()` plus scoped `render(..., { config })` and
-  `renderToString(..., { config })` so HTML sanitization can be app-local instead
-  of global-only.
-* `action.run()`, `action.with()`, `action.from()`, and `form.handleSubmit()`
-  for safer direct DOM event wiring.
-* `component()` props with `ctx.prop(name)` so custom elements can consume rich
-  structured inputs, not just attributes.
-* `router.link(path)` as a full bindable link object with base-aware `href` and
-  click handling that also works inside shadow DOM.
-* Form submits now synchronize the current form controls before validation, so
-  programmatic fills and restored browser values do not drift from form state.
-* A first-class examples runner via `npm run examples:serve` and a new
-  [Examples/index.html](Examples/index.html) launcher.
+* `repeat(items, key, render)` for keyed structural list rendering.
+* `hydrate()` plus morph-based `render()` updates for progressive enhancement
+  and SSR-style flows.
+* `createScope()` and scope-aware components and routers.
+* `observeRuntime()` for signals, resources, actions, and router activity.
+* `Router.resource()` and `Router.action()` for route-scoped async work.
+* Companion modules:
+  * `ity/query` for cache-backed async queries and optimistic mutations.
+  * `ity/forms` for nested form state, field arrays, explicit `form.sync()`,
+    and richer submit controllers.
+  * `ity/react` for wrapping Ity custom elements inside React trees.
+* The deep
+  [Examples/OperationsWorkbench/index.html](Examples/OperationsWorkbench/index.html)
+  example now uses the v3 kernel and companion modules together.
 
 ## Installation
 
@@ -52,10 +59,16 @@ npm install ity
 
 ```ts
 import Ity, { signal, computed, html, render } from "ity";
+import { createQueryClient, query } from "ity/query";
+import { createFormKit } from "ity/forms";
 ```
 
 The package ships ESM, CommonJS, browser IIFE, minified IIFE, source maps, and
 TypeScript declarations.
+
+`ity`, `ity/query`, and `ity/forms` have no runtime package dependencies.
+`ity/react` is optional and expects `react` to already exist in the consuming
+application.
 
 ## Examples
 
@@ -65,7 +78,7 @@ The repository includes small focused demos plus a deeper production-style app:
 * [Examples/Calculator/index.html](Examples/Calculator/index.html)
 * [Examples/Collection/index.html](Examples/Collection/index.html)
 * [Examples/Router/index.html](Examples/Router/index.html)
-* [Examples/OperationsWorkbench/index.html](Examples/OperationsWorkbench/index.html): a local-first operations application that exercises `resource`, `action`, `formState`, `store`, `Router`, `component`, `unsafeHTML`, and `renderToString` together.
+* [Examples/OperationsWorkbench/index.html](Examples/OperationsWorkbench/index.html): a local-first operations application that exercises `repeat`, scopes, runtime observation, `ity/query`, `ity/forms`, router resources/actions, `component()`, `unsafeHTML()`, and `renderToString()` together.
 
 Run them locally with:
 
@@ -287,6 +300,110 @@ Ity.render(() => Ity.html`
 `formState()` exposes `values`, `initialValues`, `errors`, `touched`, `dirty`,
 `valid`, `field(name)`, `bind(name)`, `set()`, `reset()`, `validate()`,
 `markTouched()`, and `submit()`.
+
+## V3 Bridges
+
+### `repeat`
+
+Use `repeat()` when list items need keyed identity:
+
+```ts
+const tasks = Ity.signal([
+  { id: "a", title: "Draft launch brief" },
+  { id: "b", title: "Ship release notes" }
+]);
+
+Ity.render(() => Ity.html`
+  <ul>
+    ${Ity.repeat(tasks(), (task) => task.id, (task) => Ity.html`
+      <li>${task.title}</li>
+    `)}
+  </ul>
+`, "#app");
+```
+
+### `hydrate`
+
+`hydrate()` attaches bindings to existing markup instead of replacing it:
+
+```ts
+Ity.hydrate(() => Ity.html`
+  <button @click=${() => console.log("ready")}>Hydrated</button>
+`, "#app");
+```
+
+### `createScope` and `observeRuntime`
+
+Scopes let components and routers share services without a framework-wide
+context object. Runtime observation gives a lightweight event stream for
+debugging and tooling.
+
+```ts
+const scope = Ity.createScope({ name: "app" });
+scope.provide("apiBase", "/api");
+
+const stop = Ity.observeRuntime((event) => {
+  console.log(event.type, event.name);
+});
+```
+
+### `ity/query`
+
+Use `ity/query` when async data should be cached and invalidated:
+
+```ts
+import { createQueryClient, query, mutation } from "ity/query";
+
+const client = createQueryClient();
+const user = query(client, ["user", "42"], async () => {
+  const response = await fetch("/api/users/42");
+  return response.json();
+});
+
+const saveUser = mutation(client, async (payload) => {
+  const response = await fetch("/api/users/42", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+  return response.json();
+}, {
+  invalidate: [["user", "42"]]
+});
+```
+
+### `ity/forms`
+
+`ity/forms` is the richer companion to core `formState()`. Use it when the form
+needs nested paths, field arrays, or explicit syncing before structural
+mutations:
+
+```ts
+import { createFormKit } from "ity/forms";
+
+const draft = createFormKit({
+  title: "",
+  checklist: [{ label: "" }]
+});
+
+const checklist = draft.array("checklist");
+```
+
+### `ity/react`
+
+Use `ity/react` when Ity custom elements need to live inside a React tree:
+
+```ts
+import { wrapCustomElement } from "ity/react";
+
+const UserCard = wrapCustomElement("user-card", {
+  events: {
+    onChoose: "choose"
+  }
+});
+```
+
+`ity/react` is a bridge, not part of the dependency-free core. Consumers using
+that entrypoint should already have `react` installed.
 
 ## HTML Templates
 
@@ -578,20 +695,19 @@ npm run test:dist
 npm run coverage
 ```
 
-The suite covers the V2 reactive runtime, DOM templating, components, router,
-platform fallbacks, and V1 compatibility.
+The suite covers the v3 reactive runtime, companion modules, DOM templating,
+components, router, platform fallbacks, and V1 compatibility.
 
 Continuous integration runs coverage, distributable build verification,
 dist-bundle tests, and `npm pack --dry-run` on Node 20 and Node 22.
 
 ## Migration
 
-See [MIGRATION.md](./MIGRATION.md) for the full V1-to-V2 and 2.2.0 migration
-guide.
+See [MIGRATION.md](./MIGRATION.md) for the full V1-to-v3 migration guide.
 
 ## Browser Support
 
-Ity 2 is built on standard browser APIs:
+Ity 3 is built on standard browser APIs:
 
 * Custom Elements and Shadow DOM for components.
 * `URLPattern` when available, with an internal fallback.

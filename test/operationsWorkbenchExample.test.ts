@@ -18,6 +18,17 @@ function createStorage(): any {
   return window.ItyExamples.createMemoryStorage();
 }
 
+function loadWorkbenchRuntime(): any {
+  return require(process.env.ITY_CORE_FILE || '../Ity');
+}
+
+function loadWorkbenchModules(): any {
+  return {
+    ...require(process.env.ITY_QUERY_FILE || '../query'),
+    ...require(process.env.ITY_FORMS_FILE || '../forms')
+  };
+}
+
 async function flush(): Promise<void> {
   await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -25,7 +36,10 @@ async function flush(): Promise<void> {
 }
 
 async function waitForWorkspace(app: any): Promise<void> {
-  if (app.workspace.promise) await app.workspace.promise;
+  const maybePromise = typeof app.workspace.promise === 'function'
+    ? app.workspace.promise()
+    : app.workspace.promise;
+  if (maybePromise) await maybePromise;
   await flush();
 }
 
@@ -38,11 +52,12 @@ describe('Operations Workbench example', function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="operationsWorkbenchApp"></div>');
     window.history.pushState(null, '', '/Examples/OperationsWorkbench/index.html');
     const createOperationsWorkbenchApp = loadWorkbenchExample();
-    const app = createOperationsWorkbenchApp(window.Ity, {
+    const app = createOperationsWorkbenchApp(loadWorkbenchRuntime(), {
       target: '#operationsWorkbenchApp',
       base: '/Examples/OperationsWorkbench',
       storage: createStorage(),
       storageKey: 'ops-workbench-test-1',
+      modules: loadWorkbenchModules(),
       latencyMs: 0,
       initialData: {
         meta: {
@@ -76,11 +91,12 @@ describe('Operations Workbench example', function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="operationsWorkbenchApp"></div>');
     window.history.pushState(null, '', '/lab/workbench/tasks/new');
     const createOperationsWorkbenchApp = loadWorkbenchExample();
-    const app = createOperationsWorkbenchApp(window.Ity, {
+    const app = createOperationsWorkbenchApp(loadWorkbenchRuntime(), {
       target: '#operationsWorkbenchApp',
       base: '/lab/workbench',
       storage: createStorage(),
       storageKey: 'ops-workbench-test-2',
+      modules: loadWorkbenchModules(),
       latencyMs: 0
     });
 
@@ -92,7 +108,10 @@ describe('Operations Workbench example', function () {
     (document.querySelector('select[name="priority"]') as HTMLSelectElement).value = 'high';
     (document.querySelector('input[name="dueDate"]') as HTMLInputElement).value = '2026-04-24';
     (document.querySelector('input[name="tags"]') as HTMLInputElement).value = 'launch, rehearsal';
-    (document.querySelector('textarea[name="checklist"]') as HTMLTextAreaElement).value = 'Book the room\nConfirm rollback captain';
+    (document.querySelector('input[name="checklist.0.label"]') as HTMLInputElement).value = 'Book the room';
+    (document.querySelector('.owbInlineActions .owbGhostButton') as HTMLButtonElement).click();
+    await flush();
+    (document.querySelector('input[name="checklist.1.label"]') as HTMLInputElement).value = 'Confirm rollback captain';
 
     submit(document.querySelector('.owbForm') as Element);
     await flush();
@@ -112,11 +131,12 @@ describe('Operations Workbench example', function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="operationsWorkbenchApp"></div>');
     window.history.pushState(null, '', '/lab/workbench/tasks/new');
     const createOperationsWorkbenchApp = loadWorkbenchExample();
-    const app = createOperationsWorkbenchApp(window.Ity, {
+    const app = createOperationsWorkbenchApp(loadWorkbenchRuntime(), {
       target: '#operationsWorkbenchApp',
       base: '/lab/workbench',
       storage: createStorage(),
       storageKey: 'ops-workbench-focus',
+      modules: loadWorkbenchModules(),
       latencyMs: 0
     });
 
@@ -152,11 +172,12 @@ describe('Operations Workbench example', function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="operationsWorkbenchApp"></div>');
     window.history.pushState(null, '', '/lab/workbench/tasks/task-flags');
     const createOperationsWorkbenchApp = loadWorkbenchExample();
-    const app = createOperationsWorkbenchApp(window.Ity, {
+    const app = createOperationsWorkbenchApp(loadWorkbenchRuntime(), {
       target: '#operationsWorkbenchApp',
       base: '/lab/workbench',
       storage: createStorage(),
       storageKey: 'ops-workbench-test-3',
+      modules: loadWorkbenchModules(),
       latencyMs: 0
     });
 
@@ -186,11 +207,12 @@ describe('Operations Workbench example', function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="operationsWorkbenchApp"></div>');
     window.history.pushState(null, '', '/lab/workbench/tasks');
     const createOperationsWorkbenchApp = loadWorkbenchExample();
-    const app = createOperationsWorkbenchApp(window.Ity, {
+    const app = createOperationsWorkbenchApp(loadWorkbenchRuntime(), {
       target: '#operationsWorkbenchApp',
       base: '/lab/workbench',
       storage: createStorage(),
       storageKey: 'ops-workbench-test-4',
+      modules: loadWorkbenchModules(),
       latencyMs: 0
     });
 
@@ -225,11 +247,12 @@ describe('Operations Workbench example', function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="operationsWorkbenchApp"></div>');
     window.history.pushState(null, '', '/lab/workbench/settings');
     const createOperationsWorkbenchApp = loadWorkbenchExample();
-    const app = createOperationsWorkbenchApp(window.Ity, {
+    const app = createOperationsWorkbenchApp(loadWorkbenchRuntime(), {
       target: '#operationsWorkbenchApp',
       base: '/lab/workbench',
       storage,
       storageKey: 'ops-workbench-test-5',
+      modules: loadWorkbenchModules(),
       latencyMs: 0
     });
 
@@ -270,11 +293,12 @@ describe('Operations Workbench example', function () {
     brokenStorage.setItem('ops-workbench-broken', '{not json');
     const cleanupBroken = setupDOM('<!DOCTYPE html><div id="operationsWorkbenchApp"></div>');
     window.history.pushState(null, '', '/lab/workbench/');
-    const brokenApp = createOperationsWorkbenchApp(window.Ity, {
+    const brokenApp = createOperationsWorkbenchApp(loadWorkbenchRuntime(), {
       target: '#operationsWorkbenchApp',
       base: '/lab/workbench',
       storage: brokenStorage,
       storageKey: 'ops-workbench-broken',
+      modules: loadWorkbenchModules(),
       latencyMs: 0
     });
 

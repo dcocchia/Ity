@@ -93,6 +93,12 @@
     latencyMs?: number;
     time?: () => number;
     sanitizer?: (value: string) => string;
+    modules?: {
+      createQueryClient: (options?: Record<string, unknown>) => any;
+      query: (client: any, key: any, loader: any, options?: Record<string, unknown>) => any;
+      mutation: (client: any, handler: any, options?: Record<string, unknown>) => any;
+      createFormKit: (initialValue: Record<string, unknown>, options?: Record<string, unknown>) => any;
+    };
   }
 
   interface TaskFormInput {
@@ -129,7 +135,7 @@
     priority: TaskPriority;
     dueDate: string;
     tags: string;
-    checklistText: string;
+    checklist: Array<{ label: string }>;
   }
 
   interface NoteDraft {
@@ -301,6 +307,14 @@
     return new Intl.DateTimeFormat('en', {
       month: 'short',
       day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    }).format(new Date(value));
+  }
+
+  function formatTimeOnly(value: string): string {
+    if (!isValidIso(value)) return '--:--';
+    return new Intl.DateTimeFormat('en', {
       hour: 'numeric',
       minute: '2-digit'
     }).format(new Date(value));
@@ -1032,7 +1046,7 @@
         priority: 'medium',
         dueDate: addDays(2, time),
         tags: '',
-        checklistText: ''
+        checklist: [{ label: '' }]
       };
     }
     return {
@@ -1043,7 +1057,9 @@
       priority: task.priority,
       dueDate: task.dueDate,
       tags: csv(task.tags),
-      checklistText: task.checklist.map((item) => item.label).join('\n')
+      checklist: task.checklist.length
+        ? task.checklist.map((item) => ({ label: item.label }))
+        : [{ label: '' }]
     };
   }
 
@@ -1189,7 +1205,7 @@
     });
 
     Ity.component('ity-workbench-task-card', {
-      props: ['task', 'owner', 'openLink', 'onAdvance'],
+      props: ['task', 'owner', 'onAdvance'],
       shadow: true,
       styles: `
         .card {
@@ -1288,12 +1304,13 @@
       setup(ctx: any) {
         const task = ctx.prop('task');
         const owner = ctx.prop('owner');
-        const openLink = ctx.prop('openLink');
         const onAdvance = ctx.prop('onAdvance');
+        const router = ctx.inject('router');
 
         return () => {
           const taskValue = task();
           const ownerValue = owner();
+          const routerValue = router();
           if (!taskValue) {
             return Ity.html`<article class="card"><p>Task unavailable.</p></article>`;
           }
@@ -1310,14 +1327,14 @@
                 <ity-workbench-relative-time datetime=${taskValue.dueDate}></ity-workbench-relative-time>
               </div>
               <div class="chips">
-                ${taskValue.tags.map((tag: string) => Ity.html`<span class="chip">${tag}</span>`)}
+                ${Ity.repeat(taskValue.tags, (tag: string) => tag, (tag: string) => Ity.html`<span class="chip">${tag}</span>`)}
               </div>
               <div class="meta">
                 <span>${taskProgress(taskValue)}</span>
                 <span>${ownerValue?.name || 'Unassigned'}</span>
               </div>
               <div class="actions">
-                <a class="secondary owbTaskCard__open" bind=${openLink() || { href: '#' }}>Open task</a>
+                <a class="secondary owbTaskCard__open" bind=${routerValue ? routerValue.link(`/tasks/${taskValue.id}`) : { href: '#' }}>Open task</a>
                 <button class="owbTaskCard__cycle" ?disabled=${typeof onAdvance() !== 'function'} @click=${() => onAdvance()?.()}>
                   Advance status
                 </button>
@@ -1351,6 +1368,14 @@
       latencyMs: typeof options.latencyMs === 'number' ? options.latencyMs : 35,
       time: options.time
     });
+    const modules = options.modules;
+    if (!modules?.createQueryClient || !modules?.query || !modules?.mutation || !modules?.createFormKit) {
+      throw new Error('Operations Workbench requires the Ity v3 companion modules: query and forms.');
+    }
+    const queryClient = modules.createQueryClient({ gcTime: 120000 });
+    const appScope = Ity.createScope({ name: 'operations-workbench' });
+    appScope.provide('repository', repository);
+    appScope.provide('queryClient', queryClient);
     const htmlConfig = Ity.createConfig({
       sanitizeHTML: options.sanitizer || sanitizeHTML
     });
@@ -1371,12 +1396,13 @@
       reportMode: 'preview'
     });
 
-    const workspace = Ity.resource(async ({ signal }: { signal: AbortSignal }) => repository.loadWorkspace(signal), {
+    const workspace = modules.query(queryClient, 'workspace', async ({ signal }: { signal: AbortSignal }) => repository.loadWorkspace(signal), {
       initialValue: undefined,
-      keepPrevious: true
+      keepPrevious: true,
+      name: 'workbench.workspace'
     });
 
-    const taskState = Ity.formState({
+    const taskState = modules.createFormKit({
       taskId: '',
       title: '',
       description: '',
@@ -1384,7 +1410,7 @@
       priority: 'medium' as TaskPriority,
       dueDate: '',
       tags: '',
-      checklistText: ''
+      checklist: [{ label: '' }]
     }, {
       validators: {
         title(value: string) {
@@ -1395,6 +1421,10 @@
         },
         dueDate(value: string) {
           return isValidDateOnly(value) ? null : 'Enter a valid due date.';
+        },
+        'checklist.0.label'(value: string, values: TaskDraft) {
+          const hasChecklist = values.checklist.some((item) => clampText(item.label));
+          return hasChecklist ? null : 'Add at least one checklist item.';
         }
       }
     });
@@ -1444,6 +1474,7 @@
         }
       }
     });
+    const taskChecklist = taskState.array('checklist');
 
     const setNotice = (message: string, tone: NoticeTone = 'info'): void => {
       Ity.batch(() => {
@@ -1460,11 +1491,14 @@
       autoStart: false,
       base,
       transition: true,
+      scope: appScope,
+      name: 'operations-workbench',
       notFound: () => {
         ui.page = 'not-found';
         ui.activeTaskId = '';
       }
     });
+    appScope.provide('router', router);
 
     const activatePage = (page: string, activeTaskId = ''): (() => void) => {
       ui.page = page;
@@ -1483,28 +1517,40 @@
     router.add('/reports', () => activatePage('reports'));
     router.add('/settings', () => activatePage('settings'));
 
+    const taskRoute = router.resource('/tasks/:id', async ({ params, signal }: { params: Record<string, string>; signal: AbortSignal }) => {
+      const data = await repository.loadWorkspace(signal);
+      return data.tasks.find((task: Task) => task.id === params.id) || null;
+    }, {
+      initialValue: null,
+      keepPrevious: false,
+      name: 'workbench.route.task'
+    });
+
     const applyMutation = (result: MutationResult): MutationResult => {
       Ity.batch(() => {
         workspace.mutate(result.workspace);
+        if (ui.activeTaskId) {
+          taskRoute.mutate(result.workspace.tasks.find((task: Task) => task.id === ui.activeTaskId) || null);
+        }
         setNotice(result.notice, 'success');
       });
       if (result.navigateTo) router.navigate(result.navigateTo);
       return result;
     };
 
-    const cycleTask = Ity.action(async (taskId: string) => applyMutation(await repository.cycleTaskStatus(taskId)), {
+    const cycleTask = modules.mutation(queryClient, async (taskId: string) => applyMutation(await repository.cycleTaskStatus(taskId)), {
       onError: onMutationError
     });
-    const toggleChecklist = Ity.action(async (taskId: string, itemId: string) => applyMutation(await repository.toggleChecklist(taskId, itemId)), {
+    const toggleChecklist = modules.mutation(queryClient, async (taskId: string, itemId: string) => applyMutation(await repository.toggleChecklist(taskId, itemId)), {
       onError: onMutationError
     });
-    const deleteTask = Ity.action(async (taskId: string) => applyMutation(await repository.deleteTask(taskId)), {
+    const deleteTask = modules.mutation(queryClient, async (taskId: string) => applyMutation(await repository.deleteTask(taskId)), {
       onError: onMutationError
     });
-    const deleteNote = Ity.action(async (noteId: string) => applyMutation(await repository.deleteNote(noteId)), {
+    const deleteNote = modules.mutation(queryClient, async (noteId: string) => applyMutation(await repository.deleteNote(noteId)), {
       onError: onMutationError
     });
-    const resetWorkspaceAction = Ity.action(async () => {
+    const resetWorkspaceAction = modules.mutation(queryClient, async () => {
       const result = applyMutation(await repository.resetWorkspace());
       taskState.reset(taskDraftFromTask(null, result.workspace, options.time));
       noteState.reset(noteDraftFromNote(null));
@@ -1516,6 +1562,10 @@
     });
 
     const taskSubmit = taskState.submit(async (values: TaskDraft) => {
+      const checklistText = values.checklist
+        .map((item) => clampText(item.label))
+        .filter(Boolean)
+        .join('\n');
       const result = applyMutation(await repository.saveTask({
         id: clampText(values.taskId),
         title: values.title,
@@ -1524,7 +1574,7 @@
         priority: values.priority,
         dueDate: values.dueDate,
         tags: parseTags(values.tags),
-        checklistText: values.checklistText
+        checklistText
       }));
       const savedTask = result.workspace.tasks.find((task) => task.id === taskIdFromPath(result.navigateTo) || task.id === values.taskId) || null;
       taskState.reset(taskDraftFromTask(savedTask, result.workspace, options.time));
@@ -1595,6 +1645,8 @@
     });
 
     const selectedTask = Ity.computed(() => {
+      const routedTask = taskRoute.data();
+      if (routedTask) return routedTask;
       const data = workspace.data();
       if (!data || !ui.activeTaskId) return null;
       return data.tasks.find((task: Task) => task.id === ui.activeTaskId) || null;
@@ -1670,6 +1722,16 @@
           </section>
         </article>
       `, { config: htmlConfig });
+    });
+
+    const runtimeEvents = Ity.signal([] as Array<{ type: string; name?: string; time: string }>);
+    const runtimeStop = Ity.observeRuntime((event: { type: string; name?: string; timestamp: number }) => {
+      const nextEntry: { type: string; name?: string; time: string } = {
+        type: event.type,
+        name: event.name,
+        time: formatTimeOnly(new Date(event.timestamp).toISOString())
+      };
+      runtimeEvents.update((items: Array<{ type: string; name?: string; time: string }>) => [nextEntry].concat(items).slice(0, 10));
     });
 
     const preferenceStop = ui.$subscribe((value: typeof ui) => {
@@ -1778,7 +1840,6 @@
       <ity-workbench-task-card
         .task=${task}
         .owner=${resolveOwner(workspaceData, task.ownerId) || null}
-        .openLink=${router.link(`/tasks/${task.id}`)}
         .onAdvance=${cycleTask.with(task.id)}
       ></ity-workbench-task-card>
     `;
@@ -1816,7 +1877,7 @@
             <a class="owbInlineLink" bind=${router.link('/tasks')}>See all tasks</a>
           </div>
           <div class="owbTaskStack">
-            ${dashboardTasks().map((task: Task) => renderTaskCard(task, workspaceData))}
+            ${Ity.repeat(dashboardTasks(), (task: Task) => task.id, (task: Task) => renderTaskCard(task, workspaceData))}
           </div>
         </article>
       </section>
@@ -1831,7 +1892,7 @@
             <a class="owbInlineLink" bind=${router.link('/notes')}>Manage notes</a>
           </div>
           <ul class="owbList">
-            ${workspaceData.notes.slice(0, 3).map((note: Note) => Ity.html`
+            ${Ity.repeat(workspaceData.notes.slice(0, 3), (note: Note) => note.id, (note: Note) => Ity.html`
               <li class="owbListItem">
                 <div>
                   <strong>${note.title}</strong>
@@ -1851,13 +1912,30 @@
             </div>
           </div>
           <ul class="owbList">
-            ${workspaceData.activity.slice(0, 6).map((entry: ActivityEntry) => Ity.html`
+            ${Ity.repeat(workspaceData.activity.slice(0, 6), (entry: ActivityEntry) => entry.id, (entry: ActivityEntry) => Ity.html`
               <li class="owbListItem">
                 <div>
                   <strong>${entry.message}</strong>
                   <p>${entry.kind}</p>
                 </div>
                 <span>${formatDateTime(entry.createdAt)}</span>
+              </li>
+            `)}
+          </ul>
+          <div class="owbSectionHeading" style=${{ marginTop: '1rem' }}>
+            <div>
+              <p class="owbKicker">Runtime Feed</p>
+              <h2>Kernel activity</h2>
+            </div>
+          </div>
+          <ul class="owbList">
+            ${Ity.repeat(runtimeEvents(), (entry: { type: string; time: string }, index: number) => `${entry.time}:${entry.type}:${index}`, (entry: { type: string; name?: string; time: string }) => Ity.html`
+              <li class="owbListItem">
+                <div>
+                  <strong>${entry.type}</strong>
+                  <p>${entry.name || 'Unnamed'}</p>
+                </div>
+                <span>${entry.time}</span>
               </li>
             `)}
           </ul>
@@ -1907,18 +1985,45 @@
             <span>Tags</span>
             <input placeholder="release, risk, qa" bind=${taskState.bind('tags')}>
           </label>
-          <label>
-            <span>Checklist (one item per line)</span>
-            <textarea rows="5" placeholder="Audit rollout defaults&#10;Run rollback drill" bind=${taskState.bind('checklistText', { type: 'textarea', name: 'checklist' })}></textarea>
-          </label>
+          <fieldset>
+            <legend>Checklist</legend>
+            <div class="owbTaskStack">
+	              ${Ity.repeat(taskChecklist.keys().map((key: string, index: number) => ({ key, index })), (item: { key: string }) => item.key, (item: { key: string; index: number }) => Ity.html`
+	                <div class="owbChecklistItem" key=${item.key}>
+	                  <input
+	                    placeholder="Audit rollout defaults"
+	                    bind=${taskState.bind(`checklist.${item.index}.label`)}
+	                  >
+	                  <button
+	                    class="owbGhostButton"
+	                    type="button"
+	                    ?disabled=${taskChecklist.items().length <= 1}
+	                    @click=${(event: Event) => {
+	                      taskState.sync(event);
+	                      taskChecklist.remove(item.index);
+	                    }}
+	                  >
+	                    Remove
+	                  </button>
+	                </div>
+	              `)}
+	            </div>
+	            <div class="owbInlineActions">
+	              <button class="owbGhostButton" type="button" @click=${(event: Event) => {
+	                taskState.sync(event);
+	                taskChecklist.push({ label: '' });
+	              }}>Add item</button>
+	            </div>
+	          </fieldset>
           <div class="owbFormActions">
             <button class="owbPrimaryButton" ?disabled=${taskSubmit.pending()}>
               ${taskSubmit.pending() ? 'Saving…' : heading === 'New task' ? 'Create task' : 'Save task'}
             </button>
             <a class="owbGhostButton owbGhostButton--link" bind=${router.link('/tasks')}>Back to task board</a>
           </div>
-          ${(taskState.touched.title && taskState.errors.title) && Ity.html`<p class="owbInlineError" role="alert">${taskState.errors.title}</p>`}
-          ${(taskState.touched.dueDate && taskState.errors.dueDate) && Ity.html`<p class="owbInlineError" role="alert">${taskState.errors.dueDate}</p>`}
+          ${(taskState.field('title').touched() && taskState.field('title').error()) && Ity.html`<p class="owbInlineError" role="alert">${taskState.field('title').error()}</p>`}
+          ${(taskState.field('dueDate').touched() && taskState.field('dueDate').error()) && Ity.html`<p class="owbInlineError" role="alert">${taskState.field('dueDate').error()}</p>`}
+          ${(taskState.field('checklist.0.label').touched() && taskState.field('checklist.0.label').error()) && Ity.html`<p class="owbInlineError" role="alert">${taskState.field('checklist.0.label').error()}</p>`}
           ${taskSubmit.error() && Ity.html`<p class="owbInlineError" role="alert">${messageFromError(taskSubmit.error())}</p>`}
         </form>
       </section>
@@ -1968,7 +2073,7 @@
         </aside>
         <section class="owbTaskStack">
           ${filteredTasks().length
-            ? filteredTasks().map((task: Task) => renderTaskCard(task, workspaceData))
+            ? Ity.repeat(filteredTasks(), (task: Task) => task.id, (task: Task) => renderTaskCard(task, workspaceData))
             : Ity.html`<article class="owbEmptyState"><h3>No tasks match the current filters.</h3><p>Change the filters or create a new task.</p></article>`}
         </section>
       </section>
@@ -2013,7 +2118,7 @@
                 </div>
               </div>
               ${task.checklist.length
-                ? task.checklist.map((item: ChecklistItem) => Ity.html`
+                ? Ity.repeat(task.checklist, (item: ChecklistItem) => item.id, (item: ChecklistItem) => Ity.html`
                   <label class="owbChecklistItem">
                     <input type="checkbox" .checked=${item.done} @change=${toggleChecklist.with(task.id, item.id)}>
                     <span>${item.label}</span>
@@ -2048,7 +2153,7 @@
               >
             </label>
             <div class="owbNoteList">
-              ${filteredNotes().map((entry: Note) => Ity.html`
+              ${Ity.repeat(filteredNotes(), (entry: Note) => entry.id, (entry: Note) => Ity.html`
                 <button class="owbNoteCard" @click=${() => { ui.editingNoteId = entry.id; }}>
                   <strong>${entry.title}</strong>
                   <span>${formatDateTime(entry.updatedAt)}</span>
@@ -2303,7 +2408,7 @@
           </main>
         </div>
       `;
-    }, target, { transition: true, config: htmlConfig });
+    }, target, { transition: true, config: htmlConfig, scope: appScope });
 
     router.start();
 
@@ -2328,6 +2433,7 @@
         disposeRender();
         preferenceStop();
         noticeStop();
+        runtimeStop();
         taskDraftStop();
         noteDraftStop();
         settingsDraftStop();

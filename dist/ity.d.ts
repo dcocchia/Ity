@@ -2,7 +2,7 @@ type Cleanup = () => void;
 type Equality<T> = (prev: T, next: T) => boolean;
 type Subscriber<T> = (value: T, previous: T) => void;
 type MaybeSignal<T> = T | ReadonlySignal<T>;
-type TemplateValue = TemplateResult | UnsafeHTML | Node | string | number | boolean | null | undefined | TemplateValue[] | ReadonlySignal<any>;
+type TemplateValue = TemplateResult | UnsafeHTML | RepeatResult | Node | string | number | boolean | null | undefined | TemplateValue[] | ReadonlySignal<any>;
 interface ReadonlySignal<T> {
     (): T;
     get(): T;
@@ -19,6 +19,7 @@ interface Signal<T> extends ReadonlySignal<T> {
 }
 interface ComputedOptions<T> {
     equals?: Equality<T>;
+    name?: string;
 }
 interface SignalOptions<T> {
     equals?: Equality<T>;
@@ -33,6 +34,10 @@ interface TemplateResult {
     readonly strings: readonly string[];
     readonly values: readonly unknown[];
 }
+interface RepeatResult {
+    readonly isRepeatResult: true;
+    readonly values: readonly unknown[];
+}
 interface UnsafeHTML {
     readonly isUnsafeHTML: true;
     readonly value: string;
@@ -44,11 +49,44 @@ interface UnsafeHTMLOptions {
 }
 interface ItyConfig {
     sanitizeHTML?: HTMLSanitizer | null;
+    onWarning?: ((warning: RuntimeWarning) => void) | null;
 }
 interface RenderOptions {
     reactive?: boolean;
     transition?: boolean;
     config?: ItyConfig | null;
+    mode?: "replace" | "morph";
+    scope?: ItyScope | null;
+    warnOnMismatch?: boolean;
+}
+interface RuntimeWarning {
+    code: string;
+    message: string;
+    detail?: unknown;
+}
+interface RuntimeEventBase {
+    type: string;
+    timestamp: number;
+}
+interface RuntimeEvent extends RuntimeEventBase {
+    name?: string;
+    detail?: unknown;
+}
+type RuntimeObserver = (event: RuntimeEvent) => void;
+type ScopeKey = string | symbol;
+interface ScopeOptions {
+    parent?: ItyScope | null;
+    name?: string;
+}
+interface ItyScope {
+    readonly parent: ItyScope | null;
+    readonly name: string | null;
+    provide<T>(key: ScopeKey, value: T): Signal<T>;
+    set<T>(key: ScopeKey, value: T): T;
+    get<T>(key: ScopeKey, fallback?: T): T;
+    signal<T>(key: ScopeKey, fallback?: T): ReadonlySignal<T>;
+    has(key: ScopeKey): boolean;
+    delete(key: ScopeKey): void;
 }
 type StoreKey = string | symbol;
 interface StoreApi<T extends Record<StoreKey, any>> {
@@ -71,6 +109,7 @@ interface ResourceOptions<T, E = unknown> {
     keepPrevious?: boolean;
     onSuccess?: (value: T) => void;
     onError?: (error: E) => void;
+    name?: string;
 }
 interface Resource<T, E = unknown> {
     readonly data: Signal<T | undefined>;
@@ -85,6 +124,7 @@ interface Resource<T, E = unknown> {
 interface ActionOptions<TResult, E = unknown> {
     onSuccess?: (value: TResult) => void;
     onError?: (error: E) => void;
+    name?: string;
 }
 interface Action<TArgs extends unknown[], TResult, E = unknown> {
     (...args: TArgs): Promise<TResult>;
@@ -168,6 +208,8 @@ interface FormState<TValues extends Record<string, any>> {
 interface RenderToStringOptions {
     config?: ItyConfig | null;
 }
+declare function observeRuntime(observer: RuntimeObserver): Cleanup;
+declare function createScope(options?: ScopeOptions): ItyScope;
 declare function signal<T>(initialValue: T, options?: SignalOptions<T>): Signal<T>;
 declare function computed<T>(getter: () => T, options?: ComputedOptions<T>): ReadonlySignal<T>;
 declare function effect(callback: (onCleanup: (cleanup: Cleanup) => void) => void): EffectHandle;
@@ -184,13 +226,18 @@ declare function form<TResult, E = unknown>(handler: (data: FormData, event: Eve
 declare function formState<TValues extends Record<string, any>>(initialValue: TValues, options?: FormStateOptions<TValues>): FormState<TValues>;
 declare function html(strings: TemplateStringsArray | readonly string[], ...values: unknown[]): TemplateResult;
 declare function unsafeHTML(value: string, options?: UnsafeHTMLOptions): UnsafeHTML;
+declare function repeat<T>(items: readonly T[] | ReadonlySignal<readonly T[]> | (() => readonly T[]), key: (item: T, index: number) => string | number, renderItem: (item: T, index: number) => unknown): RepeatResult;
 declare function render(view: TemplateValue | (() => TemplateValue), target: string | Element | DocumentFragment | SelectorObject, options?: RenderOptions): Cleanup;
+declare function hydrate(view: TemplateValue | (() => TemplateValue), target: string | Element | DocumentFragment | SelectorObject, options?: RenderOptions): Cleanup;
 declare function renderToString(view: TemplateValue | (() => TemplateValue), options?: RenderToStringOptions): string;
 interface ComponentContext {
     host: HTMLElement;
     root: HTMLElement | ShadowRoot;
+    scope: ItyScope;
     attr(name: string): ReadonlySignal<string | null>;
     prop<T = unknown>(name: string): ReadonlySignal<T>;
+    provide<T>(key: ScopeKey, value: T): Signal<T>;
+    inject<T>(key: ScopeKey, fallback?: T): ReadonlySignal<T>;
     emit<T = unknown>(name: string, detail?: T, options?: CustomEventInit<T>): boolean;
     effect(callback: (onCleanup: (cleanup: Cleanup) => void) => void): EffectHandle;
     onConnected(callback: () => void): void;
@@ -344,6 +391,14 @@ interface RouteContext {
     query: Record<string, string>;
     hash: Record<string, string>;
 }
+interface RouteResourceContext<T> extends ResourceContext<T>, RouteContext {
+    router: Router;
+    scope: ItyScope;
+}
+interface RouteActionContext extends RouteContext {
+    router: Router;
+    scope: ItyScope;
+}
 type RouteHandler = (params: Record<string, string>, context: RouteContext) => void | Cleanup;
 interface RouterOptions {
     base?: string;
@@ -351,6 +406,8 @@ interface RouterOptions {
     linkSelector?: string;
     transition?: boolean;
     notFound?: RouteHandler;
+    scope?: ItyScope | null;
+    name?: string;
 }
 declare class Router {
     private routes;
@@ -365,6 +422,8 @@ declare class Router {
     base: string;
     linkSelector: string;
     transition: boolean;
+    scope: ItyScope;
+    name: string;
     constructor(options?: RouterOptions);
     add(pattern: string, handler: RouteHandler): this;
     addRoute(pattern: string, handler: RouteHandler): void;
@@ -377,6 +436,8 @@ declare class Router {
     link(path: string, attrs?: Record<string, unknown>): Record<string, unknown>;
     start(): void;
     stop(): void;
+    resource<T, E = unknown>(pattern: string | null, loader: (context: RouteResourceContext<T>) => Promise<T> | T, options?: ResourceOptions<T, E>): Resource<T, E>;
+    action<TArgs extends unknown[], TResult, E = unknown>(handler: (context: RouteActionContext | null, ...args: TArgs) => Promise<TResult> | TResult, options?: ActionOptions<TResult, E>): Action<TArgs, TResult, E>;
     check(): RouteContext | null;
     private handleLinkClick;
     private handleNavigationEvent;
@@ -389,6 +450,8 @@ declare const Ity: {
     version: string;
     createConfig: typeof createConfig;
     configure: typeof configure;
+    createScope: typeof createScope;
+    observeRuntime: typeof observeRuntime;
     signal: typeof signal;
     computed: typeof computed;
     effect: typeof effect;
@@ -402,8 +465,10 @@ declare const Ity: {
     form: typeof form;
     formState: typeof formState;
     html: typeof html;
+    repeat: typeof repeat;
     unsafeHTML: typeof unsafeHTML;
     render: typeof render;
+    hydrate: typeof hydrate;
     renderToString: typeof renderToString;
     component: typeof component;
     route: typeof route;
@@ -416,5 +481,5 @@ declare const Ity: {
     Collection: typeof Collection;
 };
 
-export { Application, Collection, Model, Router, SelectorObject, View, action, batch, component, computed, configure, createConfig, Ity as default, effect, form, formState, html, isSignal, onDOMReady, render, renderToString, resolveSignal, resource, route, signal, store, unsafeHTML, untrack };
-export type { Action, ActionOptions, AsyncStatus, ComponentContext, ComponentOptions, EffectHandle, FormBindOptions, FormController, FormField, FormOptions, FormState, FormStateController, FormStateOptions, FormStateSubmitOptions, HTMLSanitizer, ItyConfig, ReadonlySignal, RenderOptions, RenderToStringOptions, Resource, ResourceContext, ResourceOptions, RouteContext, RouteHandler, Signal, Store, TemplateResult, UnsafeHTMLOptions };
+export { Application, Collection, Model, Router, SelectorObject, View, action, batch, component, computed, configure, createConfig, createScope, Ity as default, effect, form, formState, html, hydrate, isSignal, observeRuntime, onDOMReady, render, renderToString, repeat, resolveSignal, resource, route, signal, store, unsafeHTML, untrack };
+export type { Action, ActionOptions, AsyncStatus, Cleanup, ComponentContext, ComponentOptions, EffectHandle, FormBindOptions, FormController, FormField, FormOptions, FormState, FormStateController, FormStateOptions, FormStateSubmitOptions, HTMLSanitizer, ItyConfig, ItyScope, ReadonlySignal, RenderOptions, RenderToStringOptions, RepeatResult, Resource, ResourceContext, ResourceOptions, RouteActionContext, RouteContext, RouteHandler, RouteResourceContext, RuntimeEvent, RuntimeObserver, RuntimeWarning, ScopeKey, ScopeOptions, Signal, Store, TemplateResult, UnsafeHTMLOptions };

@@ -14,9 +14,10 @@ describe('Node environment bootstrap', function () {
       delete global.window;
     }
     const ity = require('../../Ity.js');
+    const pkg = require('../../package.json');
     assert.strictEqual(typeof global.window, 'undefined');
     assert.ok(ity);
-    assert.strictEqual(ity.version, '2.2.0');
+    assert.strictEqual(ity.version, pkg.version);
     const router = new ity.Router({ autoStart: false });
     (router as any).handleLinkClick({
       target: {
