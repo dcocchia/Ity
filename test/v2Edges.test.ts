@@ -110,7 +110,7 @@ describe('V2 production edge cases', function () {
     a.append(window.Ity.html`<em>template</em>`);
     a.prepend(document.createElement('strong'));
     a.before(src);
-    a.after('<p id="after"></p>');
+    a.after(window.Ity.unsafeHTML('<p id="after"></p>'));
     a.attr('hidden', null);
 
     assert.equal(clicked, 1);

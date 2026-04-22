@@ -284,11 +284,11 @@ declare class SelectorObject {
     text(value?: string | number | boolean): string | this;
     on(eventName: string, listener: EventListener, options?: AddEventListenerOptions): this;
     off(eventName: string, listener: EventListener, options?: EventListenerOptions): this;
-    before(content: string | SelectorObject | HTMLElement | TemplateResult): this;
-    after(content: string | SelectorObject | HTMLElement | TemplateResult): this;
-    append(content: string | SelectorObject | HTMLElement | TemplateResult): this;
-    prepend(content: string | SelectorObject | HTMLElement | TemplateResult): this;
-    html(content?: string | SelectorObject | HTMLElement | TemplateResult): this | string;
+    before(content: string | SelectorObject | HTMLElement | TemplateResult | UnsafeHTML): this;
+    after(content: string | SelectorObject | HTMLElement | TemplateResult | UnsafeHTML): this;
+    append(content: string | SelectorObject | HTMLElement | TemplateResult | UnsafeHTML): this;
+    prepend(content: string | SelectorObject | HTMLElement | TemplateResult | UnsafeHTML): this;
+    html(content?: string | SelectorObject | HTMLElement | TemplateResult | UnsafeHTML): this | string;
     empty(): this;
     private _html;
     private reindex;

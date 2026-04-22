@@ -10,7 +10,7 @@ describe('Coverage edge cases', function () {
   it('covers replace branches for html insertion', function () {
     const cleanup = setupDOM('<!DOCTYPE html><div id="target"></div><div id="src"><span class="c"></span></div>');
     const target = new window.Ity.SelectorObject([document.getElementById('target')]);
-    target._html('<span class="r"></span>', 'replace');
+    target._html(window.Ity.unsafeHTML('<span class="r"></span>'), 'replace');
     assert.strictEqual(target.first()[0].innerHTML, '<span class="r"></span>');
 
     const src = new window.Ity.SelectorObject([document.getElementById('src')]);

@@ -65,7 +65,7 @@ describe('Operations Workbench example', function () {
         meta: {
           name: 'Sanitizer Demo',
           version: 1,
-          bulletinHtml: '<p><a href="javascript:alert(1)" onclick="alert(2)">Unsafe link</a></p><script>window.__bad = true</script>',
+          bulletinHtml: '<p><a href="javascript:alert(1)" onclick="alert(2)">Unsafe link</a></p><svg><a xlink:href="data:text/html,<script>bad()</script>">Bad svg</a></svg><div srcdoc="<script>bad()</script>"></div><script>window.__bad = true</script>',
           updatedAt: new Date().toISOString()
         },
         people: [{ id: 'ava', name: 'Ava Reynolds', role: 'Lead', initials: 'AR' }],
@@ -84,6 +84,8 @@ describe('Operations Workbench example', function () {
     assert.ok(!/script/i.test(bulletin.innerHTML));
     assert.ok(!/onclick=/i.test(bulletin.innerHTML));
     assert.ok(!/javascript:/i.test(bulletin.innerHTML));
+    assert.ok(!/xlink:href=/i.test(bulletin.innerHTML));
+    assert.ok(!/srcdoc=/i.test(bulletin.innerHTML));
 
     app.dispose();
     cleanup();

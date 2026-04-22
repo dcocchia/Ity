@@ -12,15 +12,15 @@ describe('SelectorObject HTML insertion', function () {
     const a = document.getElementById('a');
     const b = document.getElementById('b');
     const selector = new window.Ity.SelectorObject([a]);
-    selector.append('<span class="x"></span>');
+    selector.append(window.Ity.unsafeHTML('<span class="x"></span>'));
     assert.equal(a.querySelectorAll('span.x').length, 1);
-    selector.prepend('<span class="y"></span>');
+    selector.prepend(window.Ity.unsafeHTML('<span class="y"></span>'));
     assert.equal(a.firstChild.className, 'y');
-    selector.after('<p id="after"></p>');
+    selector.after(window.Ity.unsafeHTML('<p id="after"></p>'));
     assert(b.previousSibling.id === 'after');
-    selector.before('<p id="before"></p>');
+    selector.before(window.Ity.unsafeHTML('<p id="before"></p>'));
     assert(a.previousSibling.id === 'before');
-    selector.html('<div id="c"></div>');
+    selector.html(window.Ity.unsafeHTML('<div id="c"></div>'));
     assert.equal(a.children.length, 1);
     assert.equal(a.firstElementChild.id, 'c');
     cleanup();
@@ -66,7 +66,7 @@ describe('SelectorObject HTML insertion', function () {
       'SPAN'
     );
     const div = document.createElement('div');
-    target.html('<p></p>');
+    target.html(window.Ity.unsafeHTML('<p></p>'));
     target.append(div);
     assert.strictEqual(
       target.first()[0].lastElementChild?.tagName,
