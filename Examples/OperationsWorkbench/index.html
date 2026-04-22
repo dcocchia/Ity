@@ -471,9 +471,23 @@
       .owbGhostButton:hover,
       .owbPrimaryButton:hover,
       .owbDangerButton:hover,
-      .owbNavLink:hover,
       .owbNoteCard:hover {
         transform: translateY(-1px);
+      }
+
+      .owbNavLink:hover,
+      .owbNavLink:focus-visible {
+        background: rgba(255, 255, 255, 0.92);
+        border-color: rgba(20, 33, 61, 0.16);
+        color: var(--owb-ink);
+        outline: none;
+      }
+
+      .owbNavLink.is-active:hover,
+      .owbNavLink.is-active:focus-visible {
+        background: var(--owb-accent);
+        border-color: transparent;
+        color: #fff;
       }
 
       .owbGhostButton:disabled,

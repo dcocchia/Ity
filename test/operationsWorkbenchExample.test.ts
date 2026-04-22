@@ -4,6 +4,8 @@ declare var require: any;
 declare function describe(desc: string, fn: () => void): void;
 declare function it(desc: string, fn: () => any): void;
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const { setupDOM } = require('./helpers');
 
 function loadWorkbenchExample(): any {
@@ -82,6 +84,41 @@ describe('Operations Workbench example', function () {
     assert.ok(!/script/i.test(bulletin.innerHTML));
     assert.ok(!/onclick=/i.test(bulletin.innerHTML));
     assert.ok(!/javascript:/i.test(bulletin.innerHTML));
+
+    app.dispose();
+    cleanup();
+  });
+
+  it('navigates between header tabs through the bound router links', async function () {
+    const cleanup = setupDOM('<!DOCTYPE html><div id="operationsWorkbenchApp"></div>');
+    window.history.pushState(null, '', '/lab/workbench/');
+    const createOperationsWorkbenchApp = loadWorkbenchExample();
+    const app = createOperationsWorkbenchApp(loadWorkbenchRuntime(), {
+      target: '#operationsWorkbenchApp',
+      base: '/lab/workbench',
+      storage: createStorage(),
+      storageKey: 'ops-workbench-nav',
+      modules: loadWorkbenchModules(),
+      latencyMs: 0
+    });
+
+    await waitForWorkspace(app);
+
+    const tasksLink = Array.from(document.querySelectorAll('.owbNavLink')).find((element) => element.textContent?.trim() === 'Tasks') as HTMLAnchorElement;
+    assert.ok(tasksLink, 'expected Tasks nav link');
+    tasksLink.click();
+    await flush();
+
+    assert.strictEqual(app.router.current().path, '/tasks');
+    assert.match(document.querySelector('.owbSectionHeading h2')?.textContent || '', /Task board/i);
+
+    const notesLink = Array.from(document.querySelectorAll('.owbNavLink')).find((element) => element.textContent?.trim() === 'Notes') as HTMLAnchorElement;
+    assert.ok(notesLink, 'expected Notes nav link');
+    notesLink.click();
+    await flush();
+
+    assert.strictEqual(app.router.current().path, '/notes');
+    assert.match(document.querySelector('.owbSectionHeading h2')?.textContent || '', /Operational memory/i);
 
     app.dispose();
     cleanup();
@@ -316,5 +353,13 @@ describe('Operations Workbench example', function () {
 
     brokenApp.dispose();
     cleanupBroken();
+  });
+
+  it('keeps tab hover styling stationary so nav targets do not thrash under the pointer', function () {
+    const html = fs.readFileSync(path.join(process.cwd(), 'Examples/OperationsWorkbench/index.html'), 'utf8');
+
+    assert.ok(!/\.owbNavLink:hover,\s*\.owbNoteCard:hover\s*\{\s*transform:\s*translateY\(-1px\);/s.test(html));
+    assert.ok(/\.owbNavLink:hover,\s*\.owbNavLink:focus-visible\s*\{[^}]*border-color:[^}]*\}/s.test(html));
+    assert.ok(!/\.owbNavLink:hover,\s*\.owbNavLink:focus-visible\s*\{[^}]*transform:/s.test(html));
   });
 });
