@@ -688,7 +688,12 @@ Supported methods include `find`, `filter`, `first`, `last`, `parent`,
 
 ## Build
 
+The repo targets Node 20+ and includes an `.nvmrc` pinned to the preferred
+local runtime. Running `nvm use` before build or release keeps local tooling in
+line with CI and avoids engine warnings.
+
 ```bash
+nvm use
 npm install
 npm run build
 ```
@@ -710,6 +715,7 @@ npm test
 npm run test:dist
 npm run coverage
 npm run perf:bench
+npm run release:npm
 ```
 
 The suite covers the v3 reactive runtime, companion modules, DOM templating,
