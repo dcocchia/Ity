@@ -1,4 +1,4 @@
-// Ity.ts 3.0.0
+// Ity.ts 3.0.1
 // (c) 2026 Dominic Cocchiarella
 // Tiny dependency-free reactive app kernel with V1 MVC compatibility.
 declare var define: any;
@@ -3700,7 +3700,7 @@ function route(pattern: string, handler: RouteHandler): Router {
 }
 
 const Ity = {
-  version: "3.0.0",
+  version: "3.0.1",
   createConfig,
   configure,
   createScope,

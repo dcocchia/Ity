@@ -3166,7 +3166,7 @@ var Ity = (function (exports) {
       return router;
   }
   const Ity = {
-      version: "3.0.0",
+      version: "3.0.1",
       createConfig,
       configure,
       createScope,
