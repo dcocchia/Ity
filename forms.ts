@@ -87,19 +87,49 @@ interface RegisteredBinding {
   parse?: (value: unknown, event: Event) => unknown;
 }
 
+const parsedPathCache = new Map<string, Array<string | number>>();
+
 function cloneValue<T>(value: T): T {
   const cloneFn = (globalThis as any).structuredClone;
   if (typeof cloneFn === "function") return cloneFn(value);
   return JSON.parse(JSON.stringify(value));
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object") return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 function deepEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    if (left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index += 1) {
+      if (!deepEqual(left[index], right[index])) return false;
+    }
+    return true;
+  }
+  if (isPlainObject(left) && isPlainObject(right)) {
+    const leftKeys = Object.keys(left);
+    const rightKeys = Object.keys(right);
+    if (leftKeys.length !== rightKeys.length) return false;
+    for (const key of leftKeys) {
+      if (!Object.prototype.hasOwnProperty.call(right, key)) return false;
+      if (!deepEqual(left[key], right[key])) return false;
+    }
+    return true;
+  }
+  return false;
 }
 
 function parsePath(path: string): Array<string | number> {
-  const parts = path.match(/[^.[\]]+/g) || [];
-  return parts.map((part) => /^\d+$/.test(part) ? Number(part) : part);
+  const cached = parsedPathCache.get(path);
+  if (cached) return cached;
+  const parts = (path.match(/[^.[\]]+/g) || []).map((part) => /^\d+$/.test(part) ? Number(part) : part);
+  if (parsedPathCache.size >= 512) parsedPathCache.clear();
+  parsedPathCache.set(path, parts);
+  return parts;
 }
 
 function getIn(value: unknown, path: string): unknown {
@@ -109,24 +139,38 @@ function getIn(value: unknown, path: string): unknown {
 function setIn<T>(value: T, path: string, next: unknown): T {
   const parts = parsePath(path);
   if (!parts.length) return next as T;
-  const root = cloneValue(value);
-  let current: any = root;
-  parts.forEach((segment, index) => {
+  const createContainer = (lookahead: string | number): Record<string, unknown> | unknown[] => {
+    return typeof lookahead === "number" ? [] : {};
+  };
+  const cloneContainer = (current: unknown, lookahead: string | number): Record<string, unknown> | unknown[] => {
+    if (Array.isArray(current)) return current.slice();
+    if (isPlainObject(current)) return { ...current };
+    return createContainer(lookahead);
+  };
+
+  const firstLookahead = parts.length > 1 ? parts[1] : parts[0];
+  const sourceRoot = value as unknown;
+  const root = cloneContainer(sourceRoot, firstLookahead) as Record<string, unknown> | unknown[];
+  let currentTarget: any = root;
+  let currentSource: any = sourceRoot;
+
+  for (let index = 0; index < parts.length; index += 1) {
+    const segment = parts[index];
     const last = index === parts.length - 1;
     if (last) {
-      current[segment as any] = next;
-      return;
+      currentTarget[segment as any] = next;
+      break;
     }
+
     const lookahead = parts[index + 1];
-    const existing = current[segment as any];
-    if (existing == null) {
-      current[segment as any] = typeof lookahead === "number" ? [] : {};
-    } else {
-      current[segment as any] = cloneValue(existing);
-    }
-    current = current[segment as any];
-  });
-  return root;
+    const sourceValue = currentSource == null ? undefined : currentSource[segment as any];
+    const nextTarget = cloneContainer(sourceValue, lookahead);
+    currentTarget[segment as any] = nextTarget;
+    currentTarget = nextTarget;
+    currentSource = sourceValue;
+  }
+
+  return root as T;
 }
 
 function listFieldPaths(value: unknown, prefix = ""): string[] {
@@ -175,6 +219,34 @@ function readControlValue(control: { value?: string } | undefined): string {
 
 function clampIndex(index: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, index));
+}
+
+function createDerivedSignal<T>(reader: () => T): ReadonlySignal<T> {
+  const read = function (): T {
+    return reader();
+  } as ReadonlySignal<T>;
+  read.get = () => reader();
+  read.peek = () => reader();
+  read.subscribe = (callback, options = {}) => {
+    let first = true;
+    let previous = read.peek();
+    return effect(() => {
+      const current = reader();
+      if (first) {
+        first = false;
+        previous = current;
+        if (options.immediate) callback(current, current);
+        return;
+      }
+      if (!Object.is(previous, current)) {
+        const prev = previous;
+        previous = current;
+        callback(current, prev);
+      }
+    });
+  };
+  Object.defineProperty(read, "isSignal", { value: true });
+  return read;
 }
 
 export function createFormKit<TValues extends Record<string, any>>(
@@ -316,16 +388,16 @@ export function createFormKit<TValues extends Record<string, any>>(
       if (Array.isArray(field.value())) {
         const optionValue = bindOptions.value;
         binding.value = optionValue === undefined ? "" : String(optionValue);
-        binding[".checked"] = computed(() => (field.value() as unknown[]).some((item) => Object.is(item, optionValue)));
+        binding[".checked"] = createDerivedSignal(() => (field.value() as unknown[]).some((item) => Object.is(item, optionValue)));
       } else {
-        binding[".checked"] = computed(() => Boolean(field.value()));
+        binding[".checked"] = createDerivedSignal(() => Boolean(field.value()));
       }
       return binding;
     }
     if (type === "radio") {
       const optionValue = bindOptions.value;
       binding.value = optionValue === undefined ? "" : String(optionValue);
-      binding[".checked"] = computed(() => Object.is(field.value(), optionValue));
+      binding[".checked"] = createDerivedSignal(() => Object.is(field.value(), optionValue));
       return binding;
     }
     if (type === "select-multiple") {

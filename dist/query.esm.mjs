@@ -1,4 +1,4 @@
-import { signal, effect, computed, action } from './ity.esm.mjs';
+import { signal, effect, computed, batch, action } from './ity.esm.mjs';
 
 function isFiniteStaleTime(staleTime) {
     return Number.isFinite(staleTime) && staleTime >= 0;
@@ -137,12 +137,14 @@ class QueryClientImpl {
                 const resolved = typeof next === "function"
                     ? next(entry.data.peek())
                     : next;
-                entry.data.set(resolved);
-                entry.error.set(null);
-                entry.pending.set(false);
-                entry.promise.set(null);
-                entry.status.set(resolved === undefined ? "idle" : "success");
-                entry.updatedAt.set(Date.now());
+                batch(() => {
+                    entry.data.set(resolved);
+                    entry.error.set(null);
+                    entry.pending.set(false);
+                    entry.promise.set(null);
+                    entry.status.set(resolved === undefined ? "idle" : "success");
+                    entry.updatedAt.set(Date.now());
+                });
             },
             dispose
         };
@@ -174,12 +176,14 @@ class QueryClientImpl {
         const resolved = typeof next === "function"
             ? next(entry.data.peek())
             : next;
-        entry.data.set(resolved);
-        entry.error.set(null);
-        entry.pending.set(false);
-        entry.promise.set(null);
-        entry.status.set(resolved === undefined ? "idle" : "success");
-        entry.updatedAt.set(Date.now());
+        batch(() => {
+            entry.data.set(resolved);
+            entry.error.set(null);
+            entry.pending.set(false);
+            entry.promise.set(null);
+            entry.status.set(resolved === undefined ? "idle" : "success");
+            entry.updatedAt.set(Date.now());
+        });
         this.scheduleGc(entry);
     }
     getStatus(key) {
@@ -207,15 +211,18 @@ class QueryClientImpl {
         }, options);
     }
     ensureEntry(key, options) {
+        var _a, _b;
         const keyString = serializeKey(key);
         if (this.entries.has(keyString)) {
             const entry = this.entries.get(keyString);
             entry.rawKey = key;
+            entry.gcTime = (_a = options.gcTime) !== null && _a !== void 0 ? _a : entry.gcTime;
             return entry;
         }
         const entry = {
             rawKey: key,
             keyString,
+            gcTime: (_b = options.gcTime) !== null && _b !== void 0 ? _b : this.gcTime,
             data: signal(options.initialData, { name: `${options.name || "query"}.data` }),
             error: signal(null, { name: `${options.name || "query"}.error` }),
             pending: signal(false, { name: `${options.name || "query"}.pending` }),
@@ -249,8 +256,10 @@ class QueryClientImpl {
         entry.refreshId += 1;
         (_a = entry.controller) === null || _a === void 0 ? void 0 : _a.abort();
         entry.controller = null;
-        entry.pending.set(false);
-        entry.promise.set(null);
+        batch(() => {
+            entry.pending.set(false);
+            entry.promise.set(null);
+        });
     }
     scheduleGc(entry) {
         if (entry.refs > 0)
@@ -259,7 +268,7 @@ class QueryClientImpl {
             clearTimeout(entry.gcTimer);
             entry.gcTimer = null;
         }
-        const gcTime = this.gcTime;
+        const gcTime = entry.gcTime;
         if (gcTime <= 0) {
             this.cancelEntry(entry);
             this.entries.delete(entry.keyString);
@@ -282,12 +291,14 @@ class QueryClientImpl {
         (_a = entry.controller) === null || _a === void 0 ? void 0 : _a.abort();
         entry.controller = new AbortController();
         const previous = entry.data.peek();
-        entry.pending.set(true);
-        entry.status.set("loading");
-        entry.error.set(null);
-        if (options.keepPrevious === false) {
-            entry.data.set(undefined);
-        }
+        batch(() => {
+            entry.pending.set(true);
+            entry.status.set("loading");
+            entry.error.set(null);
+            if (options.keepPrevious === false) {
+                entry.data.set(undefined);
+            }
+        });
         const promise = Promise.resolve()
             .then(() => loader({
             key: entry.rawKey,
@@ -300,11 +311,13 @@ class QueryClientImpl {
             var _a;
             if (refreshId !== entry.refreshId)
                 return entry.data.peek();
-            entry.data.set(value);
-            entry.error.set(null);
-            entry.status.set("success");
-            entry.updatedAt.set(Date.now());
-            entry.invalidatedAt.set(0);
+            batch(() => {
+                entry.data.set(value);
+                entry.error.set(null);
+                entry.status.set("success");
+                entry.updatedAt.set(Date.now());
+                entry.invalidatedAt.set(0);
+            });
             (_a = options.onSuccess) === null || _a === void 0 ? void 0 : _a.call(options, value);
             return value;
         })
@@ -312,16 +325,20 @@ class QueryClientImpl {
             var _a;
             if (refreshId !== entry.refreshId)
                 return entry.data.peek();
-            entry.error.set(error);
-            entry.status.set("error");
+            batch(() => {
+                entry.error.set(error);
+                entry.status.set("error");
+            });
             (_a = options.onError) === null || _a === void 0 ? void 0 : _a.call(options, error);
             return entry.data.peek();
         })
             .finally(() => {
             if (refreshId !== entry.refreshId)
                 return;
-            entry.pending.set(false);
-            entry.promise.set(null);
+            batch(() => {
+                entry.pending.set(false);
+                entry.promise.set(null);
+            });
             entry.controller = null;
             this.scheduleGc(entry);
         });

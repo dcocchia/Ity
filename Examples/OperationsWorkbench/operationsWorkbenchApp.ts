@@ -352,6 +352,71 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function deepEqualValue(left: unknown, right: unknown): boolean {
+    if (Object.is(left, right)) return true;
+    if (Array.isArray(left) && Array.isArray(right)) {
+      if (left.length !== right.length) return false;
+      for (let index = 0; index < left.length; index += 1) {
+        if (!deepEqualValue(left[index], right[index])) return false;
+      }
+      return true;
+    }
+    if (isPlainObject(left) && isPlainObject(right)) {
+      const leftKeys = Object.keys(left);
+      const rightKeys = Object.keys(right);
+      if (leftKeys.length !== rightKeys.length) return false;
+      for (const key of leftKeys) {
+        if (!Object.prototype.hasOwnProperty.call(right, key)) return false;
+        if (!deepEqualValue((left as Record<string, unknown>)[key], (right as Record<string, unknown>)[key])) return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  function reuseById<T extends { id: string }>(previous: T[], next: T[]): T[] {
+    const previousById = new Map(previous.map((item) => [item.id, item] as const));
+    const reused = next.map((item) => {
+      const current = previousById.get(item.id);
+      return current && deepEqualValue(current, item) ? current : item;
+    });
+    if (reused.length === previous.length && reused.every((item, index) => item === previous[index])) {
+      return previous;
+    }
+    return reused;
+  }
+
+  function reuseWorkspace(previous: WorkspaceData | undefined, next: WorkspaceData): WorkspaceData {
+    if (!previous) return next;
+    const meta = deepEqualValue(previous.meta, next.meta) ? previous.meta : next.meta;
+    const people = reuseById(previous.people, next.people);
+    const tasks = reuseById(previous.tasks, next.tasks);
+    const notes = reuseById(previous.notes, next.notes);
+    const activity = reuseById(previous.activity, next.activity);
+    const settings = deepEqualValue(previous.settings, next.settings) ? previous.settings : next.settings;
+
+    if (
+      meta === previous.meta
+      && people === previous.people
+      && tasks === previous.tasks
+      && notes === previous.notes
+      && activity === previous.activity
+      && settings === previous.settings
+    ) {
+      return previous;
+    }
+
+    return {
+      ...next,
+      meta,
+      people,
+      tasks,
+      notes,
+      activity,
+      settings
+    };
+  }
+
   function sortTasks(tasks: Task[]): Task[] {
     return tasks.slice().sort((left, right) => {
       const priorityDelta = PRIORITY_ORDER[left.priority] - PRIORITY_ORDER[right.priority];
@@ -1517,25 +1582,17 @@
     router.add('/reports', () => activatePage('reports'));
     router.add('/settings', () => activatePage('settings'));
 
-    const taskRoute = router.resource('/tasks/:id', async ({ params, signal }: { params: Record<string, string>; signal: AbortSignal }) => {
-      const data = await repository.loadWorkspace(signal);
-      return data.tasks.find((task: Task) => task.id === params.id) || null;
-    }, {
-      initialValue: null,
-      keepPrevious: false,
-      name: 'workbench.route.task'
-    });
-
     const applyMutation = (result: MutationResult): MutationResult => {
+      const nextWorkspace = reuseWorkspace(workspace.data() || undefined, result.workspace);
       Ity.batch(() => {
-        workspace.mutate(result.workspace);
-        if (ui.activeTaskId) {
-          taskRoute.mutate(result.workspace.tasks.find((task: Task) => task.id === ui.activeTaskId) || null);
-        }
+        workspace.mutate(nextWorkspace);
         setNotice(result.notice, 'success');
       });
       if (result.navigateTo) router.navigate(result.navigateTo);
-      return result;
+      return {
+        ...result,
+        workspace: nextWorkspace
+      };
     };
 
     const cycleTask = modules.mutation(queryClient, async (taskId: string) => applyMutation(await repository.cycleTaskStatus(taskId)), {
@@ -1645,8 +1702,6 @@
     });
 
     const selectedTask = Ity.computed(() => {
-      const routedTask = taskRoute.data();
-      if (routedTask) return routedTask;
       const data = workspace.data();
       if (!data || !ui.activeTaskId) return null;
       return data.tasks.find((task: Task) => task.id === ui.activeTaskId) || null;
@@ -1757,6 +1812,29 @@
       return workspaceData.people.find((person) => person.id === ownerId);
     };
 
+    const cycleTaskHandlerCache = new Map<string, () => void>();
+    const getCycleTaskHandler = (taskId: string): (() => void) => {
+      let handler = cycleTaskHandlerCache.get(taskId);
+      if (!handler) {
+        const nextHandler = cycleTask.with(taskId) as () => void;
+        cycleTaskHandlerCache.set(taskId, nextHandler);
+        handler = nextHandler;
+      }
+      return handler as () => void;
+    };
+
+    const cycleTaskHandlerStop = Ity.effect(() => {
+      const data = workspace.data();
+      if (!data) {
+        cycleTaskHandlerCache.clear();
+        return;
+      }
+      const validTaskIds = new Set(data.tasks.map((task: Task) => task.id));
+      for (const taskId of Array.from(cycleTaskHandlerCache.keys())) {
+        if (!validTaskIds.has(taskId)) cycleTaskHandlerCache.delete(taskId);
+      }
+    });
+
     let lastTaskDraftContext = '';
     let lastTaskDraftValue = '';
     const taskDraftStop = Ity.effect(() => {
@@ -1840,7 +1918,7 @@
       <ity-workbench-task-card
         .task=${task}
         .owner=${resolveOwner(workspaceData, task.ownerId) || null}
-        .onAdvance=${cycleTask.with(task.id)}
+        .onAdvance=${getCycleTaskHandler(task.id)}
       ></ity-workbench-task-card>
     `;
 
@@ -2332,16 +2410,7 @@
       const data = workspace.data();
       const page = ui.page;
       const current = router.current();
-      const isBusy = workspace.loading()
-        || cycleTask.pending()
-        || toggleChecklist.pending()
-        || deleteTask.pending()
-        || deleteNote.pending()
-        || resetWorkspaceAction.pending()
-        || taskSubmit.pending()
-        || noteSubmit.pending()
-        || settingsSubmit.pending()
-        || importSubmit.pending();
+      const isBusy = workspace.loading();
 
       return Ity.html`
         <div class="owbRoot" data-accent=${data?.settings.accent || 'sunrise'}>
@@ -2437,6 +2506,7 @@
         taskDraftStop();
         noteDraftStop();
         settingsDraftStop();
+        cycleTaskHandlerStop();
       }
     };
   }

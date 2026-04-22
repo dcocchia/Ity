@@ -1,5 +1,6 @@
 import {
   action,
+  batch,
   computed,
   effect,
   signal,
@@ -81,6 +82,7 @@ export interface QueryClient {
 interface QueryEntry<T = unknown, E = unknown> {
   rawKey: QueryKey;
   keyString: string;
+  gcTime: number;
   data: Signal<T | undefined>;
   error: Signal<E | null>;
   pending: Signal<boolean>;
@@ -231,12 +233,14 @@ class QueryClientImpl implements QueryClient {
         const resolved = typeof next === "function"
           ? (next as (previous: T | undefined) => T | undefined)(entry.data.peek())
           : next;
-        entry.data.set(resolved);
-        entry.error.set(null);
-        entry.pending.set(false);
-        entry.promise.set(null);
-        entry.status.set(resolved === undefined ? "idle" : "success");
-        entry.updatedAt.set(Date.now());
+        batch(() => {
+          entry.data.set(resolved);
+          entry.error.set(null);
+          entry.pending.set(false);
+          entry.promise.set(null);
+          entry.status.set(resolved === undefined ? "idle" : "success");
+          entry.updatedAt.set(Date.now());
+        });
       },
       dispose
     };
@@ -274,12 +278,14 @@ class QueryClientImpl implements QueryClient {
     const resolved = typeof next === "function"
       ? (next as (previous: T | undefined) => T | undefined)(entry.data.peek())
       : next;
-    entry.data.set(resolved);
-    entry.error.set(null);
-    entry.pending.set(false);
-    entry.promise.set(null);
-    entry.status.set(resolved === undefined ? "idle" : "success");
-    entry.updatedAt.set(Date.now());
+    batch(() => {
+      entry.data.set(resolved);
+      entry.error.set(null);
+      entry.pending.set(false);
+      entry.promise.set(null);
+      entry.status.set(resolved === undefined ? "idle" : "success");
+      entry.updatedAt.set(Date.now());
+    });
     this.scheduleGc(entry);
   }
 
@@ -314,11 +320,13 @@ class QueryClientImpl implements QueryClient {
     if (this.entries.has(keyString)) {
       const entry = this.entries.get(keyString)! as QueryEntry<T, E>;
       entry.rawKey = key;
+      entry.gcTime = options.gcTime ?? entry.gcTime;
       return entry;
     }
     const entry: QueryEntry<T, E> = {
       rawKey: key,
       keyString,
+      gcTime: options.gcTime ?? this.gcTime,
       data: signal<T | undefined>(options.initialData, { name: `${options.name || "query"}.data` }),
       error: signal<E | null>(null, { name: `${options.name || "query"}.error` }),
       pending: signal(false, { name: `${options.name || "query"}.pending` }),
@@ -353,8 +361,10 @@ class QueryClientImpl implements QueryClient {
     entry.refreshId += 1;
     entry.controller?.abort();
     entry.controller = null;
-    entry.pending.set(false);
-    entry.promise.set(null);
+    batch(() => {
+      entry.pending.set(false);
+      entry.promise.set(null);
+    });
   }
 
   private scheduleGc(entry: QueryEntry<any, any>): void {
@@ -363,7 +373,7 @@ class QueryClientImpl implements QueryClient {
       clearTimeout(entry.gcTimer);
       entry.gcTimer = null;
     }
-    const gcTime = this.gcTime;
+    const gcTime = entry.gcTime;
     if (gcTime <= 0) {
       this.cancelEntry(entry);
       this.entries.delete(entry.keyString);
@@ -388,12 +398,14 @@ class QueryClientImpl implements QueryClient {
     entry.controller?.abort();
     entry.controller = new AbortController();
     const previous = entry.data.peek();
-    entry.pending.set(true);
-    entry.status.set("loading");
-    entry.error.set(null);
-    if (options.keepPrevious === false) {
-      entry.data.set(undefined);
-    }
+    batch(() => {
+      entry.pending.set(true);
+      entry.status.set("loading");
+      entry.error.set(null);
+      if (options.keepPrevious === false) {
+        entry.data.set(undefined);
+      }
+    });
     const promise = Promise.resolve()
       .then(() => loader({
         key: entry.rawKey,
@@ -404,25 +416,31 @@ class QueryClientImpl implements QueryClient {
       }))
       .then((value) => {
         if (refreshId !== entry.refreshId) return entry.data.peek();
-        entry.data.set(value);
-        entry.error.set(null);
-        entry.status.set("success");
-        entry.updatedAt.set(Date.now());
-        entry.invalidatedAt.set(0);
+        batch(() => {
+          entry.data.set(value);
+          entry.error.set(null);
+          entry.status.set("success");
+          entry.updatedAt.set(Date.now());
+          entry.invalidatedAt.set(0);
+        });
         options.onSuccess?.(value);
         return value;
       })
       .catch((error) => {
         if (refreshId !== entry.refreshId) return entry.data.peek();
-        entry.error.set(error as E);
-        entry.status.set("error");
+        batch(() => {
+          entry.error.set(error as E);
+          entry.status.set("error");
+        });
         options.onError?.(error as E);
         return entry.data.peek();
       })
       .finally(() => {
         if (refreshId !== entry.refreshId) return;
-        entry.pending.set(false);
-        entry.promise.set(null);
+        batch(() => {
+          entry.pending.set(false);
+          entry.promise.set(null);
+        });
         entry.controller = null;
         this.scheduleGc(entry);
       });

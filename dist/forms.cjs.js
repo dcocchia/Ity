@@ -2,18 +2,55 @@
 
 var Ity = require('./ity.cjs.js');
 
+const parsedPathCache = new Map();
 function cloneValue(value) {
     const cloneFn = globalThis.structuredClone;
     if (typeof cloneFn === "function")
         return cloneFn(value);
     return JSON.parse(JSON.stringify(value));
 }
+function isPlainObject(value) {
+    if (!value || typeof value !== "object")
+        return false;
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+}
 function deepEqual(left, right) {
-    return JSON.stringify(left) === JSON.stringify(right);
+    if (Object.is(left, right))
+        return true;
+    if (Array.isArray(left) && Array.isArray(right)) {
+        if (left.length !== right.length)
+            return false;
+        for (let index = 0; index < left.length; index += 1) {
+            if (!deepEqual(left[index], right[index]))
+                return false;
+        }
+        return true;
+    }
+    if (isPlainObject(left) && isPlainObject(right)) {
+        const leftKeys = Object.keys(left);
+        const rightKeys = Object.keys(right);
+        if (leftKeys.length !== rightKeys.length)
+            return false;
+        for (const key of leftKeys) {
+            if (!Object.prototype.hasOwnProperty.call(right, key))
+                return false;
+            if (!deepEqual(left[key], right[key]))
+                return false;
+        }
+        return true;
+    }
+    return false;
 }
 function parsePath(path) {
-    const parts = path.match(/[^.[\]]+/g) || [];
-    return parts.map((part) => /^\d+$/.test(part) ? Number(part) : part);
+    const cached = parsedPathCache.get(path);
+    if (cached)
+        return cached;
+    const parts = (path.match(/[^.[\]]+/g) || []).map((part) => /^\d+$/.test(part) ? Number(part) : part);
+    if (parsedPathCache.size >= 512)
+        parsedPathCache.clear();
+    parsedPathCache.set(path, parts);
+    return parts;
 }
 function getIn(value, path) {
     return parsePath(path).reduce((current, segment) => current == null ? undefined : current[segment], value);
@@ -22,24 +59,35 @@ function setIn(value, path, next) {
     const parts = parsePath(path);
     if (!parts.length)
         return next;
-    const root = cloneValue(value);
-    let current = root;
-    parts.forEach((segment, index) => {
+    const createContainer = (lookahead) => {
+        return typeof lookahead === "number" ? [] : {};
+    };
+    const cloneContainer = (current, lookahead) => {
+        if (Array.isArray(current))
+            return current.slice();
+        if (isPlainObject(current))
+            return { ...current };
+        return createContainer(lookahead);
+    };
+    const firstLookahead = parts.length > 1 ? parts[1] : parts[0];
+    const sourceRoot = value;
+    const root = cloneContainer(sourceRoot, firstLookahead);
+    let currentTarget = root;
+    let currentSource = sourceRoot;
+    for (let index = 0; index < parts.length; index += 1) {
+        const segment = parts[index];
         const last = index === parts.length - 1;
         if (last) {
-            current[segment] = next;
-            return;
+            currentTarget[segment] = next;
+            break;
         }
         const lookahead = parts[index + 1];
-        const existing = current[segment];
-        if (existing == null) {
-            current[segment] = typeof lookahead === "number" ? [] : {};
-        }
-        else {
-            current[segment] = cloneValue(existing);
-        }
-        current = current[segment];
-    });
+        const sourceValue = currentSource == null ? undefined : currentSource[segment];
+        const nextTarget = cloneContainer(sourceValue, lookahead);
+        currentTarget[segment] = nextTarget;
+        currentTarget = nextTarget;
+        currentSource = sourceValue;
+    }
     return root;
 }
 function listFieldPaths(value, prefix = "") {
@@ -87,6 +135,34 @@ function readControlValue(control) {
 }
 function clampIndex(index, min, max) {
     return Math.max(min, Math.min(max, index));
+}
+function createDerivedSignal(reader) {
+    const read = function () {
+        return reader();
+    };
+    read.get = () => reader();
+    read.peek = () => reader();
+    read.subscribe = (callback, options = {}) => {
+        let first = true;
+        let previous = read.peek();
+        return Ity.effect(() => {
+            const current = reader();
+            if (first) {
+                first = false;
+                previous = current;
+                if (options.immediate)
+                    callback(current, current);
+                return;
+            }
+            if (!Object.is(previous, current)) {
+                const prev = previous;
+                previous = current;
+                callback(current, prev);
+            }
+        });
+    };
+    Object.defineProperty(read, "isSignal", { value: true });
+    return read;
 }
 function createFormKit(initialValue, options = {}) {
     const values = Ity.signal(cloneValue(initialValue), { name: "formkit.values" });
@@ -231,17 +307,17 @@ function createFormKit(initialValue, options = {}) {
             if (Array.isArray(field.value())) {
                 const optionValue = bindOptions.value;
                 binding.value = optionValue === undefined ? "" : String(optionValue);
-                binding[".checked"] = Ity.computed(() => field.value().some((item) => Object.is(item, optionValue)));
+                binding[".checked"] = createDerivedSignal(() => field.value().some((item) => Object.is(item, optionValue)));
             }
             else {
-                binding[".checked"] = Ity.computed(() => Boolean(field.value()));
+                binding[".checked"] = createDerivedSignal(() => Boolean(field.value()));
             }
             return binding;
         }
         if (type === "radio") {
             const optionValue = bindOptions.value;
             binding.value = optionValue === undefined ? "" : String(optionValue);
-            binding[".checked"] = Ity.computed(() => Object.is(field.value(), optionValue));
+            binding[".checked"] = createDerivedSignal(() => Object.is(field.value(), optionValue));
             return binding;
         }
         if (type === "select-multiple") {

@@ -51,6 +51,22 @@ Ity 3.0.0 expands the kernel without changing its native-first design:
   [Examples/OperationsWorkbench/index.html](Examples/OperationsWorkbench/index.html)
   example now uses the v3 kernel and companion modules together.
 
+## What's New In 3.0.2
+
+Ity 3.0.2 is a performance-focused patch release with no intended API breaks:
+
+* Core template rendering now caches compiled binding plans across reactive
+  rerenders, which reduces repeated fragment scanning and binding lookup work.
+* `resource()`, `action()`, and `ity/query` batch their internal state writes
+  more aggressively, and query-level `gcTime` overrides now apply correctly.
+* `formState()` and `ity/forms` reuse field handles, avoid stringify-based deep
+  equality checks, and clone only the nested paths that actually changed.
+* The Operations Workbench example no longer reloads the workspace when opening
+  task detail routes and now reuses unchanged task identities and task-card
+  action handlers to reduce list churn during mutations.
+* `npm run perf:bench` now runs a jsdom benchmark harness against both focused
+  kernel scenarios and the Operations Workbench example.
+
 ## Installation
 
 ```bash
@@ -693,10 +709,12 @@ This creates:
 npm test
 npm run test:dist
 npm run coverage
+npm run perf:bench
 ```
 
 The suite covers the v3 reactive runtime, companion modules, DOM templating,
-components, router, platform fallbacks, and V1 compatibility.
+components, router, platform fallbacks, workbench performance regressions, and
+V1 compatibility.
 
 Continuous integration runs coverage, distributable build verification,
 dist-bundle tests, and `npm pack --dry-run` on Node 20 and Node 22.

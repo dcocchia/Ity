@@ -199,6 +199,20 @@ describe('Query module', function () {
     assert.strictEqual(client.getStatus(['manual', 'ephemeral']), 'missing');
   });
 
+  it('honors per-query gcTime overrides over the client default', async function () {
+    const client = createQueryClient({ gcTime: 50 });
+    const current = query(client, ['override', 'gc'], async () => ({ ok: true }), {
+      gcTime: 5
+    });
+
+    await current.refresh();
+    current.dispose();
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    assert.strictEqual(client.getStatus(['override', 'gc']), 'missing');
+  });
+
   it('keeps structurally similar but non-json query keys distinct', function () {
     const client = createQueryClient();
 
